@@ -1,0 +1,21 @@
+{
+  "name": "synthetic-monitoring-action",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:synthetic": "playwright test"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.525.0",
+    "prom-client": "^15.1.0",
+    "web-vitals": "^3.5.2",
+    "archiver": "^6.0.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.42.1",
+    "@types/archiver": "^6.0.2",
+    "@types/node": "^20.11.24",
+    "typescript": "^5.3.3"
+  }
+}

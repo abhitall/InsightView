@@ -1,0 +1,53 @@
+name: Synthetic Monitoring
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # Runs every 30 minutes
+  workflow_dispatch:  # Allows manual triggering
+    inputs:
+      test_url:
+        description: 'Target URL to test'
+        required: false
+        type: string
+      browser:
+        description: 'Browser to test with'
+        required: false
+        type: choice
+        options:
+          - chromium
+          - mobile-chrome
+        default: 'chromium'
+      env_vars:
+        description: 'Additional environment variables (JSON)'
+        required: false
+        type: string
+        default: '{}'
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  S3_BUCKET: ${{ secrets.S3_BUCKET }}
+  PROMETHEUS_PUSHGATEWAY: ${{ secrets.PROMETHEUS_PUSHGATEWAY }}
+  TEST_URL: ${{ inputs.test_url || secrets.TEST_URL }}
+
+jobs:
+  synthetic-tests:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.42.1-focal
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Synthetic Monitoring
+        uses: ./.github/actions/synthetic-monitoring
+        with:
+          test_url: ${{ env.TEST_URL }}
+          aws_access_key_id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws_region: ${{ env.AWS_REGION }}
+          s3_bucket: ${{ env.S3_BUCKET }}
+          prometheus_pushgateway: ${{ env.PROMETHEUS_PUSHGATEWAY }}
+          browser: ${{ inputs.browser || 'chromium' }}
+          env_vars: ${{ inputs.env_vars }}

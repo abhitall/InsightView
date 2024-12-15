@@ -1,0 +1,93 @@
+name: 'Synthetic Monitoring'
+description: 'Run synthetic monitoring tests with Playwright, sending metrics to Prometheus and traces to S3'
+branding:
+  icon: 'activity'
+  color: 'blue'
+
+inputs:
+  test_url:
+    description: 'Target URL to test'
+    required: true
+  aws_access_key_id:
+    description: 'AWS Access Key ID'
+    required: true
+  aws_secret_access_key:
+    description: 'AWS Secret Access Key'
+    required: true
+  aws_region:
+    description: 'AWS Region'
+    required: true
+  s3_bucket:
+    description: 'S3 Bucket name'
+    required: true
+  prometheus_pushgateway:
+    description: 'Prometheus Pushgateway URL'
+    required: true
+  browser:
+    description: 'Browser to use for testing'
+    required: false
+    default: 'chromium'
+  config_path:
+    description: 'Path to Playwright config file'
+    required: false
+    default: ''
+  test_dir:
+    description: 'Directory containing test files'
+    required: false
+    default: ''
+  env_vars:
+    description: 'JSON string of additional environment variables'
+    required: false
+    default: '{}'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install dependencies
+      shell: bash
+      run: npm ci
+
+    - name: Install Playwright
+      shell: bash
+      run: npx playwright install --with-deps ${{ inputs.browser }}
+
+    - name: Setup environment
+      shell: bash
+      run: |
+        # Infrastructure secrets
+        cat << EOF > .env
+        AWS_ACCESS_KEY_ID=${{ inputs.aws_access_key_id }}
+        AWS_SECRET_ACCESS_KEY=${{ inputs.aws_secret_access_key }}
+        AWS_REGION=${{ inputs.aws_region }}
+        S3_BUCKET=${{ inputs.s3_bucket }}
+        PROMETHEUS_PUSHGATEWAY=${{ inputs.prometheus_pushgateway }}
+        TEST_URL=${{ inputs.test_url }}
+        EOF
+
+        # Add custom environment variables if provided
+        if [ ! -z "${{ inputs.env_vars }}" ]; then
+          echo "${{ inputs.env_vars }}" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' >> .env
+        fi
+
+    - name: Run synthetic tests
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.config_path }}" ]; then
+          npm run test:synthetic -- --config="${{ inputs.config_path }}" --project=${{ inputs.browser }}
+        else
+          npm run test:synthetic -- --project=${{ inputs.browser }}
+        fi
+
+    - name: Upload Playwright report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: playwright-report-${{ github.run_id }}
+        path: playwright-report/
+        retention-days: 30

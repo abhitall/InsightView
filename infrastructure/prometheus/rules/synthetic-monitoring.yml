@@ -1,0 +1,17 @@
+groups:
+  - name: synthetic-monitoring
+    rules:
+      - record: synthetic_monitoring:web_vitals:avg
+        expr: avg(synthetic_monitoring_web_vitals) by (metric, url)
+      
+      - record: synthetic_monitoring:test_metrics:success_rate
+        expr: sum(synthetic_monitoring_test_metrics{status="passed"}) / sum(synthetic_monitoring_test_metrics) * 100
+      
+      - alert: HighWebVitalValues
+        expr: synthetic_monitoring_web_vitals{metric=~"LCP|FID"} > threshold
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High Web Vital values detected
+          description: "{{ $labels.metric }} is above threshold for {{ $labels.url }}"

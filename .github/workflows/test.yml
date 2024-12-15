@@ -1,0 +1,29 @@
+name: Test Action
+
+on:
+  pull_request:
+    paths:
+      - '.github/actions/synthetic-monitoring/**'
+      - 'src/**'
+      - 'tests/**'
+      - 'package.json'
+      - 'playwright.config.ts'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Synthetic Monitoring
+        uses: ./.github/actions/synthetic-monitoring
+        with:
+          test_url: 'http://example.com'
+          aws_access_key_id: 'test'
+          aws_secret_access_key: 'test'
+          aws_region: 'us-east-1'
+          s3_bucket: 'test-bucket'
+          prometheus_pushgateway: 'http://localhost:9091'
+          browser: 'chromium'
+          test_dir: './tests'
