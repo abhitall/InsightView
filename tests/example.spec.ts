@@ -8,7 +8,7 @@ test('homepage performance test', async ({ page, monitoring }) => {
   });
   
   await test.step('Verify page title', async () => {
-    await expect(page).toHaveTitle(/Vite \+ React/);
+    await expect(page).toHaveTitle('Example Domain');
   });
   
   await test.step('Collect monitoring data', async () => {
