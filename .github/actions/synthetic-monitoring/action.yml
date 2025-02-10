@@ -49,6 +49,17 @@ runs:
         node-version: '20'
         cache: 'npm'
 
+    - name: Install system dependencies
+      shell: bash
+      run: |
+        if command -v apt-get >/dev/null; then
+          apt-get update && apt-get install -y jq
+        elif command -v apk >/dev/null; then
+          apk add --no-cache jq
+        else
+          echo "Package manager not found, attempting to continue..."
+        fi
+
     - name: Install dependencies
       shell: bash
       run: npm ci
@@ -74,6 +85,10 @@ runs:
         if [ ! -z "${{ inputs.env_vars }}" ]; then
           echo "${{ inputs.env_vars }}" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' >> .env
         fi
+
+    - name: Create test directories
+      shell: bash
+      run: mkdir -p playwright-report
 
     - name: Run synthetic tests
       shell: bash
