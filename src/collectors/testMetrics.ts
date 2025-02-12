@@ -1,5 +1,6 @@
 import type { Page, TestInfo } from '@playwright/test';
 import type { TestMetrics, ResourceMetrics, NavigationMetrics } from '../types';
+import fs from 'fs';
 
 async function collectResourceMetrics(page: Page): Promise<ResourceMetrics> {
   return await page.evaluate(() => {
@@ -24,30 +25,45 @@ async function collectNavigationMetrics(page: Page): Promise<NavigationMetrics> 
   });
 }
 
+function sanitizeTestInfo(testInfo: TestInfo) {
+  return {
+    title: testInfo.title,
+    status: testInfo.status || 'unknown',
+    retry: testInfo.retry,
+    titlePath: testInfo.titlePath,
+    duration: testInfo.duration,
+    errors: testInfo.errors.map(error => ({
+      message: error.message,
+      stack: error.stack
+    }))
+  };
+}
+
 export async function collectTestMetrics(page: Page, testInfo: TestInfo, startTime: number): Promise<TestMetrics> {
   const [resourceStats, navigationStats] = await Promise.all([
     collectResourceMetrics(page),
     collectNavigationMetrics(page),
   ]);
 
-  const steps = testInfo.steps.map(step => ({
-    name: step.title,
-    duration: step.duration,
-    status: step.error ? 'failed' : 'passed',
-  }));
+  const sanitizedTestInfo = sanitizeTestInfo(testInfo);
+  fs.writeFileSync('testInfo.json', JSON.stringify(sanitizedTestInfo, null, 2));
 
   return {
     duration: Date.now() - startTime,
-    status: testInfo.status,
+    status: testInfo.status || 'unknown',
     name: testInfo.title,
     retries: testInfo.retry,
-    steps,
+    steps: testInfo.titlePath.map(title => ({
+      name: title,
+      duration: 0, // We can't get individual step durations from titlePath
+      status: 'unknown',
+    })),
     resourceStats,
     navigationStats,
     assertions: {
-      total: testInfo.expectedStatuses?.length || 0,
-      passed: testInfo.expectedStatuses?.filter(s => s.passed).length || 0,
-      failed: testInfo.expectedStatuses?.filter(s => !s.passed).length || 0,
+      total: testInfo.errors.length,
+      passed: testInfo.status === 'passed' ? 1 : 0,
+      failed: testInfo.status === 'failed' ? 1 : 0,
     },
   };
 }
