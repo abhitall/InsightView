@@ -28,16 +28,27 @@ export class S3Exporter {
       }
     };
 
-    // Add endpoint configuration if provided
-    if (endpoint) {
+    // For AWS S3, use the correct endpoint format if no custom endpoint is provided
+    if (!endpoint) {
+      // Do not set endpoint for AWS S3 - the SDK will handle regional endpoints automatically
+      clientConfig.forcePathStyle = false; // Use virtual hosted-style access for AWS S3
+    } else {
+      // For custom S3-compatible services
       clientConfig.endpoint = endpoint;
       clientConfig.forcePathStyle = forcePathStyle;
       
-      // If TLS verification is disabled, configure the HTTP client
       if (!tlsVerify) {
         clientConfig.tls = false;
       }
     }
+
+    console.log('S3 Client Config:', {
+      ...clientConfig,
+      credentials: {
+        accessKeyId: '***',
+        secretAccessKey: '***'
+      }
+    });
 
     this.bucket = bucket;
     this.client = new S3Client(clientConfig);

@@ -15,20 +15,20 @@ inputs:
     description: 'AWS/S3 Secret Access Key'
     required: true
   aws_region:
-    description: 'AWS/S3 Region'
+    description: 'AWS/S3 Region. For AWS S3 buckets, this must match your bucket region (e.g., us-east-2)'
     required: true
   s3_bucket:
     description: 'S3 Bucket name'
     required: true
   s3_endpoint:
-    description: 'S3 Endpoint URL (for S3-compatible services)'
+    description: 'S3 Endpoint URL (Do NOT set this for AWS S3 buckets. Only use for non-AWS S3-compatible services)'
     required: false
   s3_force_path_style:
-    description: 'Use path-style addressing for S3'
+    description: 'Use path-style addressing for S3 (Do NOT set this for AWS S3 buckets. Only use for non-AWS S3-compatible services)'
     required: false
     default: 'false'
   s3_tls_verify:
-    description: 'Verify TLS certificates for S3'
+    description: 'Verify TLS certificates for S3 (Do NOT set this for AWS S3 buckets. Only use for non-AWS S3-compatible services)'
     required: false
     default: 'true'
   prometheus_pushgateway:
@@ -88,9 +88,19 @@ runs:
         AWS_SECRET_ACCESS_KEY=${{ inputs.aws_secret_access_key }}
         AWS_REGION=${{ inputs.aws_region }}
         S3_BUCKET=${{ inputs.s3_bucket }}
+        EOF
+
+        # Only add S3 endpoint configuration for non-AWS S3 services
+        if [ ! -z "${{ inputs.s3_endpoint }}" ]; then
+          cat << EOF >> .env
         S3_ENDPOINT=${{ inputs.s3_endpoint }}
         S3_FORCE_PATH_STYLE=${{ inputs.s3_force_path_style }}
         S3_TLS_VERIFY=${{ inputs.s3_tls_verify }}
+        EOF
+        fi
+
+        # Add remaining configuration
+        cat << EOF >> .env
         PROMETHEUS_PUSHGATEWAY=${{ inputs.prometheus_pushgateway }}
         TEST_URL=${{ inputs.test_url }}
         EOF
@@ -102,7 +112,7 @@ runs:
 
     - name: Create test directories
       shell: bash
-      run: mkdir -p playwright-report
+      run: mkdir -p playwright-report test-results
 
     - name: Run synthetic tests
       shell: bash
@@ -118,5 +128,7 @@ runs:
       uses: actions/upload-artifact@v4
       with:
         name: playwright-report-${{ github.run_id }}
-        path: playwright-report/
+        path: |
+          playwright-report/
+          test-results/
         retention-days: 30
