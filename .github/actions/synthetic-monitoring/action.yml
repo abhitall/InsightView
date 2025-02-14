@@ -9,17 +9,28 @@ inputs:
     description: 'Target URL to test'
     required: true
   aws_access_key_id:
-    description: 'AWS Access Key ID'
+    description: 'AWS/S3 Access Key ID'
     required: true
   aws_secret_access_key:
-    description: 'AWS Secret Access Key'
+    description: 'AWS/S3 Secret Access Key'
     required: true
   aws_region:
-    description: 'AWS Region'
+    description: 'AWS/S3 Region'
     required: true
   s3_bucket:
     description: 'S3 Bucket name'
     required: true
+  s3_endpoint:
+    description: 'S3 Endpoint URL (for S3-compatible services)'
+    required: false
+  s3_force_path_style:
+    description: 'Use path-style addressing for S3'
+    required: false
+    default: 'false'
+  s3_tls_verify:
+    description: 'Verify TLS certificates for S3'
+    required: false
+    default: 'true'
   prometheus_pushgateway:
     description: 'Prometheus Pushgateway URL'
     required: true
@@ -77,6 +88,9 @@ runs:
         AWS_SECRET_ACCESS_KEY=${{ inputs.aws_secret_access_key }}
         AWS_REGION=${{ inputs.aws_region }}
         S3_BUCKET=${{ inputs.s3_bucket }}
+        S3_ENDPOINT=${{ inputs.s3_endpoint }}
+        S3_FORCE_PATH_STYLE=${{ inputs.s3_force_path_style }}
+        S3_TLS_VERIFY=${{ inputs.s3_tls_verify }}
         PROMETHEUS_PUSHGATEWAY=${{ inputs.prometheus_pushgateway }}
         TEST_URL=${{ inputs.test_url }}
         EOF

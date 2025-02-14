@@ -10,23 +10,37 @@ export class S3Exporter {
   private bucket: string;
 
   constructor() {
-    const endpoint = process.env.S3_ENDPOINT;
     const region = process.env.AWS_REGION;
     const bucket = process.env.S3_BUCKET;
+    const endpoint = process.env.S3_ENDPOINT;
+    const forcePathStyle = process.env.S3_FORCE_PATH_STYLE === 'true';
+    const tlsVerify = process.env.S3_TLS_VERIFY !== 'false';
 
     if (!region || !bucket) {
       throw new Error('AWS_REGION and S3_BUCKET environment variables must be set');
     }
 
-    this.bucket = bucket;
-    this.client = new S3Client({
-      endpoint,
+    const clientConfig: any = {
       region,
       credentials: {
         accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
-      },
-    });
+      }
+    };
+
+    // Add endpoint configuration if provided
+    if (endpoint) {
+      clientConfig.endpoint = endpoint;
+      clientConfig.forcePathStyle = forcePathStyle;
+      
+      // If TLS verification is disabled, configure the HTTP client
+      if (!tlsVerify) {
+        clientConfig.tls = false;
+      }
+    }
+
+    this.bucket = bucket;
+    this.client = new S3Client(clientConfig);
   }
 
   async export(report: MonitoringReport, testInfo: TestInfo): Promise<void> {
@@ -55,20 +69,15 @@ export class S3Exporter {
     // Add report.json
     archive.append(JSON.stringify(report, null, 2), { name: 'report.json' });
 
-    try {
-      // Handle test output
-      const outputFile = 'test-output.txt';
-      if (typeof testInfo.outputPath === 'function') {
-        const generatedPath = testInfo.outputPath(outputFile);
-        if (fs.existsSync(generatedPath)) {
-          const stats = fs.statSync(generatedPath);
-          if (stats.size > 0) {
-            archive.file(generatedPath, { name: outputFile });
-          }
+    // Add test output file if it exists and is not empty
+    if (typeof testInfo.outputPath === 'function') {
+      const outputPath = testInfo.outputPath('test-output.txt');
+      if (fs.existsSync(outputPath)) {
+        const stats = fs.statSync(outputPath);
+        if (stats.size > 0) {
+          archive.file(outputPath, { name: 'test-output.txt' });
         }
       }
-    } catch (error) {
-      console.warn('Failed to add test output file:', error);
     }
 
     archive.on('data', (chunk) => chunks.push(chunk));
