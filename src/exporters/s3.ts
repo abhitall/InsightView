@@ -61,9 +61,33 @@ export class S3Exporter {
     const archive = archiver('zip', { zlib: { level: 9 } });
     const chunks: any[] = [];
 
+    // Add test result directories if they exist
+    const resultDirs = [
+      { path: 'test-results', name: 'test-results' },
+      { path: 'playwright-report', name: 'playwright-report' }
+    ];
+
+    for (const dir of resultDirs) {
+      const fullPath = path.join(process.cwd(), dir.path);
+      if (fs.existsSync(fullPath)) {
+        try {
+          const stats = fs.statSync(fullPath);
+          if (stats.isDirectory()) {
+            archive.directory(fullPath, dir.name);
+            console.log(`Added ${dir.path} directory to archive`);
+          }
+        } catch (error) {
+          console.warn(`Failed to add ${dir.path} directory:`, error);
+        }
+      } else {
+        console.log(`${dir.path} directory not found`);
+      }
+    }
+
     // Add trace directory if it exists
     if (testInfo.outputDir && typeof testInfo.outputDir === 'string' && fs.existsSync(testInfo.outputDir)) {
       archive.directory(testInfo.outputDir, 'trace');
+      console.log('Added trace directory to archive');
     }
 
     // Add report.json
@@ -76,6 +100,27 @@ export class S3Exporter {
         const stats = fs.statSync(outputPath);
         if (stats.size > 0) {
           archive.file(outputPath, { name: 'test-output.txt' });
+          console.log('Added test output file to archive');
+        }
+      }
+    }
+
+    // Add attachments (which includes videos and screenshots)
+    if (Array.isArray(testInfo.attachments)) {
+      for (const attachment of testInfo.attachments) {
+        try {
+          if (attachment.path && fs.existsSync(attachment.path)) {
+            const attachmentStats = fs.statSync(attachment.path);
+            if (attachmentStats.size > 0) {
+              const attachmentType = attachment.contentType?.startsWith('video/') ? 'videos' : 'attachments';
+              archive.file(attachment.path, { 
+                name: `${attachmentType}/${attachment.name || path.basename(attachment.path)}` 
+              });
+              console.log(`Added ${attachmentType} attachment to archive: ${attachment.name || path.basename(attachment.path)}`);
+            }
+          }
+        } catch (error) {
+          console.warn(`Failed to add attachment ${attachment.name}:`, error);
         }
       }
     }
