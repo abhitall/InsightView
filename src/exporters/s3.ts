@@ -28,26 +28,26 @@ export class S3Exporter {
       }
     };
 
-    // For AWS S3, use the correct endpoint format if no custom endpoint is provided
-    if (!endpoint) {
-      // Do not set endpoint for AWS S3 - the SDK will handle regional endpoints automatically
-      clientConfig.forcePathStyle = false; // Use virtual hosted-style access for AWS S3
-    } else {
-      // For custom S3-compatible services
+    if (endpoint) {
+      // Custom S3-compatible service configuration
       clientConfig.endpoint = endpoint;
       clientConfig.forcePathStyle = forcePathStyle;
-      
       if (!tlsVerify) {
         clientConfig.tls = false;
       }
+    } else {
+      // AWS S3 configuration
+      clientConfig.endpoint = `https://${bucket}.s3.${region}.amazonaws.com`;
+      clientConfig.forcePathStyle = false;
+      clientConfig.followRegionRedirects = true;
     }
 
-    console.log('S3 Client Config:', {
-      ...clientConfig,
-      credentials: {
-        accessKeyId: '***',
-        secretAccessKey: '***'
-      }
+    // Debug logging
+    console.log('S3 Configuration:', {
+      region,
+      bucket,
+      endpoint: clientConfig.endpoint,
+      forcePathStyle: clientConfig.forcePathStyle
     });
 
     this.bucket = bucket;
@@ -156,6 +156,23 @@ export class S3Exporter {
       Metadata: metadata,
     });
 
-    await this.client.send(command);
+    try {
+      const result = await this.client.send(command);
+      console.log(`Successfully uploaded to S3: ${this.bucket}/${key}`, {
+        requestId: result.$metadata?.requestId,
+        httpStatusCode: result.$metadata?.httpStatusCode
+      });
+    } catch (error: any) {
+      console.error('S3 Upload Error:', {
+        bucket: this.bucket,
+        region: process.env.AWS_REGION,
+        error: error.message,
+        code: error.$metadata?.httpStatusCode,
+        requestId: error.$metadata?.requestId,
+        cfId: error.$metadata?.cfId,
+        extendedRequestId: error.$metadata?.extendedRequestId
+      });
+      throw error;
+    }
   }
 }

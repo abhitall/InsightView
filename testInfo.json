@@ -1,0 +1,11 @@
+{
+  "title": "homepage performance test",
+  "status": "passed",
+  "retry": 2,
+  "titlePath": [
+    "example.spec.ts",
+    "homepage performance test"
+  ],
+  "duration": 0,
+  "errors": []
+}

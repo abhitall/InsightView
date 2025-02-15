@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import path from 'path';
 
 export default defineConfig({
   testDir: process.env.TEST_DIR || './tests',
@@ -6,7 +7,8 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: 'html',
+  reporter: [['html', { outputFolder: 'playwright-report' }]],
+  outputDir: 'test-results',
   use: {
     baseURL: process.env.TEST_URL,
     trace: 'on',

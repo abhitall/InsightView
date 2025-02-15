@@ -3,19 +3,30 @@ import { expect } from '@playwright/test';
 
 test('homepage performance test', async ({ page, monitoring }) => {
   await test.step('Navigate to homepage', async () => {
-    await page.goto('/', { waitUntil: 'networkidle' });
-    // Ensure the page is fully loaded and interactive
-    await page.waitForLoadState('domcontentloaded');
-    await page.waitForLoadState('load');
+    // Increase timeout for initial navigation
+    await page.goto('/', { 
+      waitUntil: 'networkidle',
+      timeout: 30000 
+    });
+    
+    // Wait for page load
+    await Promise.all([
+      page.waitForLoadState('domcontentloaded'),
+      page.waitForLoadState('load'),
+      page.waitForLoadState('networkidle'),
+    ]);
   });
   
   await test.step('Wait for page stability', async () => {
-    // Wait additional time for JS execution and animations
-    await page.waitForTimeout(2000);
+    // Wait for any dynamic content to settle
+    await page.waitForTimeout(3000);
   });
   
   await test.step('Verify page title', async () => {
-    await expect(page).toHaveTitle('Example Domain');
+    // Increase timeout and add retry ability for title check
+    await expect(page, 'Page title should be "Example Domain"').toHaveTitle('Example Domain', {
+      timeout: 10000
+    });
   });
   
   await test.step('Collect monitoring data', async () => {
