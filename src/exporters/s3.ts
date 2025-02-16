@@ -36,18 +36,18 @@ export class S3Exporter {
         clientConfig.tls = false;
       }
     } else {
-      // AWS S3 configuration
-      clientConfig.endpoint = `https://${bucket}.s3.${region}.amazonaws.com`;
-      clientConfig.forcePathStyle = false;
-      clientConfig.followRegionRedirects = true;
+      // Let AWS SDK handle endpoints automatically
+      clientConfig.useAccelerateEndpoint = false;
+      clientConfig.useDualstackEndpoint = false;
+      clientConfig.useFipsEndpoint = false;
     }
 
-    // Debug logging
-    console.log('S3 Configuration:', {
-      region,
-      bucket,
-      endpoint: clientConfig.endpoint,
-      forcePathStyle: clientConfig.forcePathStyle
+    console.log('S3 Client Config:', {
+      ...clientConfig,
+      credentials: {
+        accessKeyId: '***',
+        secretAccessKey: '***'
+      }
     });
 
     this.bucket = bucket;
@@ -157,20 +157,14 @@ export class S3Exporter {
     });
 
     try {
-      const result = await this.client.send(command);
-      console.log(`Successfully uploaded to S3: ${this.bucket}/${key}`, {
-        requestId: result.$metadata?.requestId,
-        httpStatusCode: result.$metadata?.httpStatusCode
-      });
+      await this.client.send(command);
     } catch (error: any) {
       console.error('S3 Upload Error:', {
         bucket: this.bucket,
-        region: process.env.AWS_REGION,
+        key,
         error: error.message,
-        code: error.$metadata?.httpStatusCode,
-        requestId: error.$metadata?.requestId,
-        cfId: error.$metadata?.cfId,
-        extendedRequestId: error.$metadata?.extendedRequestId
+        code: error.Code,
+        endpoint: error.Endpoint
       });
       throw error;
     }
