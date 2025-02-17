@@ -1,6 +1,41 @@
 import { test } from '../src/monitoring';
 import { expect } from '@playwright/test';
 
+test('multi-page performance test', async ({ page, context, monitoring }) => {
+  // First page
+  await test.step('Navigate to first page', async () => {
+    await page.goto('/', { 
+      waitUntil: 'networkidle',
+      timeout: 30000 
+    });
+    await Promise.all([
+      page.waitForLoadState('domcontentloaded'),
+      page.waitForLoadState('load'),
+      page.waitForLoadState('networkidle'),
+    ]);
+    await page.waitForTimeout(3000);
+  });
+
+  // Second page
+  const secondPage = await context.newPage();
+  await test.step('Navigate to second page', async () => {
+    await secondPage.goto('/about', { 
+      waitUntil: 'networkidle',
+      timeout: 30000 
+    });
+    await Promise.all([
+      secondPage.waitForLoadState('domcontentloaded'),
+      secondPage.waitForLoadState('load'),
+      secondPage.waitForLoadState('networkidle'),
+    ]);
+    await secondPage.waitForTimeout(3000);
+  });
+
+  await test.step('Collect monitoring data from both pages', async () => {
+    await monitoring([page, secondPage]);
+  });
+});
+
 test('homepage performance test', async ({ page, monitoring }) => {
   await test.step('Navigate to homepage', async () => {
     // Increase timeout for initial navigation

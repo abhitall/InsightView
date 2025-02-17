@@ -57,7 +57,7 @@ export interface ViewportInfo {
 }
 
 export interface MonitoringReport {
-  webVitals: WebVitalsData;
+  webVitals: WebVitalsData | WebVitalsData[];  // Updated to support single or multiple pages
   testMetrics: TestMetrics;
   timestamp: number;
   environment: {

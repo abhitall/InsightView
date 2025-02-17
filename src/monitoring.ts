@@ -1,4 +1,5 @@
 import { test as base } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { collectWebVitals } from './collectors/webVitals';
 import { collectTestMetrics } from './collectors/testMetrics';
 import { PrometheusExporter } from './exporters/prometheus';
@@ -12,11 +13,13 @@ export const test = base.extend({
   monitoring: async ({ page, browserName }, use, testInfo) => {
     const startTime = Date.now();
     
-    await use(async () => {
-      const [webVitals, testMetrics] = await Promise.all([
-        collectWebVitals(page),
-        collectTestMetrics(page, testInfo, startTime),
-      ]);
+    await use(async (pages?: Page[] | void) => {
+      // If pages array is provided, collect Web Vitals from all pages
+      const webVitals = pages 
+        ? await Promise.all(pages.map(p => collectWebVitals(p)))
+        : await collectWebVitals(page);
+
+      const testMetrics = await collectTestMetrics(page, testInfo, startTime);
       
       const report: MonitoringReport = {
         webVitals,

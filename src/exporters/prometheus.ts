@@ -32,16 +32,21 @@ export class PrometheusExporter {
       test_name: testMetrics.name,
     };
 
-    // Export Web Vitals metrics
-    webVitals.metrics.forEach((metric) => {
-      this.webVitalsGauge.set(
-        { 
-          ...labels,
-          metric: metric.name,
-          url: webVitals.url,
-        },
-        metric.value
-      );
+    // Handle single page or array of web vitals
+    const webVitalsArray = Array.isArray(webVitals) ? webVitals : [webVitals];
+    
+    // Export Web Vitals metrics for each page
+    webVitalsArray.forEach((pageWebVitals) => {
+      pageWebVitals.metrics.forEach((metric) => {
+        this.webVitalsGauge.set(
+          { 
+            ...labels,
+            metric: metric.name,
+            url: pageWebVitals.url,
+          },
+          metric.value
+        );
+      });
     });
 
     // Export test metrics
