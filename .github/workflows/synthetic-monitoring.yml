@@ -59,15 +59,26 @@ jobs:
           --health-retries 5
           --health-start-period 30s
           --user zap
-          --entrypoint sh
-          -e ZAP_PORT=8080
-          -e JAVA_OPTS="-Xmx4096m -Xms2048m"
-          -e ZAP_ARGS="-daemon -port 8080 -host 0.0.0.0 -config api.disablekey=false -config database.recoverylog=false -config connection.timeoutInSecs=120 -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true -config scanner.threadPerHost=4 -config view.mode=attack"
-        command: ["-c", "zap.sh $${ZAP_ARGS}"]
-    
+
     steps:
       - uses: actions/checkout@v4
       
+      # Add ZAP configuration step before other steps
+      - name: Configure ZAP
+        run: |
+          # Wait for ZAP to be responsive
+          until curl -sf http://localhost:8080/ > /dev/null; do
+            echo "Waiting for ZAP to start..."
+            sleep 2
+          done
+          
+          # Configure ZAP settings
+          curl -sf "http://localhost:8080/JSON/core/action/setOptionHttpStateEnabled/?boolean=true"
+          curl -sf "http://localhost:8080/JSON/core/action/setOptionThreadPerHost/?Integer=4"
+          curl -sf "http://localhost:8080/JSON/core/action/setOptionTimeoutInSecs/?Integer=120"
+          curl -sf "http://localhost:8080/JSON/spider/action/setOptionMaxDuration/?Integer=60"
+          curl -sf "http://localhost:8080/JSON/spider/action/setOptionMaxParseSizeBytes/?Integer=10485760"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
