@@ -40,23 +40,48 @@ jobs:
         image: ghcr.io/zaproxy/zaproxy:stable
         ports:
           - 8080:8080
-        options: >-
-          --health-cmd "wget --no-verbose --tries=1 --spider http://localhost:8080/ || exit 1"
-          --health-interval 20s
-          --health-timeout 10s
-          --health-retries 6
-          --health-start-period 30s
         env:
           JAVA_OPTS: "-Xmx512m"
-        volumes:
-          - /tmp/zap:/zap/wrk:rw
+        options: >-
+          --entrypoint "zap.sh"
+          --health-cmd "wget -qO- http://localhost:8080/JSON/core/view/version/ || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 30s
+        args: >-
+          -daemon
+          -host 0.0.0.0
+          -port 8080
+          -config api.addrs.addr.name=.*
+          -config api.addrs.addr.regex=true
+          -config api.disablekey=true
+          -config database.recoverylog=false
+          -config connection.timeoutInSecs=60
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Wait for ZAP
+      - name: Setup ZAP environment
         run: |
-          timeout 60s bash -c 'while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' localhost:8080)" != "200" ]]; do sleep 5; done' || false
+          sudo mkdir -p /tmp/zap
+          sudo chown -R 1000:1000 /tmp/zap
+          sudo chmod -R 777 /tmp/zap
+
+      - name: Wait for ZAP
+        timeout-minutes: 2
+        run: |
+          echo "Waiting for ZAP to be ready..."
+          for i in {1..12}; do
+            if curl -s -f http://localhost:8080/JSON/core/view/version/ > /dev/null; then
+              echo "ZAP is ready!"
+              exit 0
+            fi
+            echo "Attempt $i: ZAP not ready yet..."
+            sleep 10
+          done
+          echo "ZAP failed to start"
+          exit 1
 
       - name: Run Synthetic Monitoring
         uses: ./.github/actions/synthetic-monitoring
