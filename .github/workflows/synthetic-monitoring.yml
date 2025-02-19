@@ -41,13 +41,22 @@ jobs:
         ports:
           - 8080:8080
         options: >-
-          --health-cmd "curl -f http://localhost:8080/ || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          --health-cmd "wget --no-verbose --tries=1 --spider http://localhost:8080/ || exit 1"
+          --health-interval 20s
+          --health-timeout 10s
+          --health-retries 6
+          --health-start-period 30s
+        env:
+          JAVA_OPTS: "-Xmx512m"
+        volumes:
+          - /tmp/zap:/zap/wrk:rw
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Wait for ZAP
+        run: |
+          timeout 60s bash -c 'while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' localhost:8080)" != "200" ]]; do sleep 5; done' || false
 
       - name: Run Synthetic Monitoring
         uses: ./.github/actions/synthetic-monitoring
