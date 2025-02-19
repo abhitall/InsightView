@@ -136,6 +136,36 @@ export class S3Exporter {
       }
     }
 
+    // Add ZAP scan results if available
+    if (report.zapScan) {
+      const zapResults = {
+        ...report.zapScan,
+        prNumber: process.env.GITHUB_PR_NUMBER || null,
+        eventType: process.env.GITHUB_EVENT_NAME || 'manual',
+        weekNumber: this.getWeekNumber(new Date(report.zapScan.timestamp)),
+        year: new Date(report.zapScan.timestamp).getFullYear()
+      };
+      archive.append(JSON.stringify(zapResults, null, 2), { name: 'zap-scan-results.json' });
+
+      // Store in appropriate structure based on scan context
+      let basePath = 'security-scans';
+      if (process.env.GITHUB_EVENT_NAME === 'pull_request') {
+        basePath = `${basePath}/pull-requests/pr-${process.env.GITHUB_PR_NUMBER}`;
+      } else if (process.env.GITHUB_EVENT_NAME === 'schedule') {
+        basePath = `${basePath}/${zapResults.year}/week-${zapResults.weekNumber}`;
+      }
+
+      const scanKey = `${basePath}/zap-scan-${report.zapScan.timestamp}.json`;
+      await this.uploadToS3(scanKey, Buffer.from(JSON.stringify(zapResults)), {
+        scanType: report.zapScan.scanType || 'zap-full-scan',
+        context: process.env.GITHUB_EVENT_NAME || 'manual',
+        prNumber: process.env.GITHUB_PR_NUMBER || '',
+        weekNumber: zapResults.weekNumber.toString(),
+        year: zapResults.year.toString(),
+        targetUrl: report.zapScan.targetUrl
+      });
+    }
+
     archive.on('data', (chunk) => chunks.push(chunk));
 
     await new Promise((resolve, reject) => {
@@ -145,6 +175,14 @@ export class S3Exporter {
     });
 
     return Buffer.concat(chunks);
+  }
+
+  private getWeekNumber(date: Date): number {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
   }
 
   private async uploadToS3(key: string, body: Buffer, metadata: Record<string, string>): Promise<void> {

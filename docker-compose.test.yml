@@ -21,10 +21,39 @@ services:
       timeout: 5s
       retries: 5
 
+  zap:
+    image: owasp/zap2docker-stable
+    ports:
+      - "8080:8080"
+    environment:
+      - ZAP_PORT=8080
+      - ZAP_WEBSWING_OPTS="-host 0.0.0.0 -port 8080 -mem 4096m"
+      - ZAP_SCRIPT_DIR=/zap/wrk/scripts
+      # Allow ZAP to accept self-signed certificates
+      - JAVA_OPTS="-Xmx4096m -Dzap.checkCertificatesOnStartup=false"
+    volumes:
+      - ./zap/scripts:/zap/wrk/scripts:rw
+      - ./zap/data:/zap/wrk:rw
+    command: zap.sh -daemon -host 0.0.0.0 -port 8080 -config api.disablekey=false -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true -config connection.timeoutInSecs=600
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - zap-network
+
   pushgateway:
     image: prom/pushgateway
     ports:
       - "9091:9091"
+    networks:
+      - zap-network
 
 volumes:
   minio_data:
+
+networks:
+  zap-network:
+    driver: bridge

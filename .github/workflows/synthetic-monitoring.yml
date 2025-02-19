@@ -2,52 +2,170 @@ name: Synthetic Monitoring
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # Runs every 30 minutes
-  workflow_dispatch:  # Allows manual triggering
+    - cron: '*/30 * * * *'  # Regular monitoring
+    - cron: '0 2 * * 1'     # Weekly security scan
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:
     inputs:
       test_url:
         description: 'Target URL to test'
         required: false
         type: string
-      browser:
-        description: 'Browser to test with'
+      scan_type:
+        description: 'Type of scan to run'
         required: false
         type: choice
         options:
-          - chromium
-          - mobile-chrome
-        default: 'chromium'
-      env_vars:
-        description: 'Additional environment variables (JSON)'
-        required: false
-        type: string
-        default: '{}'
+          - monitoring
+          - security
+          - both
+        default: 'both'
 
 env:
+  TEST_URL: ${{ inputs.test_url || secrets.TEST_URL }}
+  ZAP_API_URL: http://localhost:8080
+  ZAP_API_KEY: ${{ secrets.ZAP_API_KEY || '' }}
+  AUTH_USERNAME: ${{ secrets.AUTH_USERNAME }}
+  AUTH_PASSWORD: ${{ secrets.AUTH_PASSWORD }}
   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
   AWS_REGION: ${{ secrets.AWS_REGION }}
   S3_BUCKET: ${{ secrets.S3_BUCKET }}
   PROMETHEUS_PUSHGATEWAY: ${{ secrets.PROMETHEUS_PUSHGATEWAY }}
-  TEST_URL: ${{ inputs.test_url || secrets.TEST_URL }}
+  GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
+  NODE_ENV: production
+  DEBUG: pw:api*,zap:*
+  SCAN_TYPE: ${{ github.event.schedule == '0 2 * * 1' && 'full' || github.event_name == 'pull_request' && 'quick' || inputs.scan_type || 'monitoring' }}
+  GITHUB_EVENT_NAME: ${{ github.event_name }}
 
 jobs:
-  synthetic-tests:
+  test:
     runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.42.1-focal
+    
+    services:
+      zap:
+        image: owasp/zap2docker-stable
+        ports:
+          - 8080:8080
+        options: >-
+          --name zap
+          -v ${{ github.workspace }}/zap:/zap/wrk:rw
+          -e ZAP_PORT=8080
+          -e ZAP_WEBSWING_OPTS="-host 0.0.0.0 -port 8080 -mem 4096m"
+          -e ZAP_SCRIPT_DIR=/zap/wrk/scripts
+          --health-cmd "curl -f http://localhost:8080/ || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --health-start-period 30s
     
     steps:
       - uses: actions/checkout@v4
-
-      - name: Run Synthetic Monitoring
-        uses: ./.github/actions/synthetic-monitoring
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          test_url: ${{ env.TEST_URL }}
-          aws_access_key_id: ${{ env.AWS_ACCESS_KEY_ID }}
-          aws_secret_access_key: ${{ env.AWS_SECRET_ACCESS_KEY }}
-          aws_region: ${{ env.AWS_REGION }}
-          s3_bucket: ${{ env.S3_BUCKET }}
-          prometheus_pushgateway: ${{ env.PROMETHEUS_PUSHGATEWAY }}
-          browser: ${{ inputs.browser || 'chromium' }}
-          env_vars: ${{ inputs.env_vars }}
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm install -g @zaproxy/zap-api-client
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Initialize ZAP
+        run: |
+          echo "Waiting for ZAP to be ready..."
+          timeout 60s bash -c 'until curl -s http://localhost:8080/ > /dev/null; do sleep 1; done'
+          
+          # Create ZAP scripts directory
+          mkdir -p zap/scripts
+          
+          # Configure ZAP
+          curl -s "http://localhost:8080/JSON/core/action/setOptionMaxDepth/?Integer=10"
+          curl -s "http://localhost:8080/JSON/core/action/setOptionDefaultUserAgent/?String=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36"
+          curl -s "http://localhost:8080/JSON/core/action/setOptionHttpStateEnabled/?boolean=true"
+          curl -s "http://localhost:8080/JSON/core/action/setOptionUseProxyChain/?boolean=true"
+          curl -s "http://localhost:8080/JSON/core/action/setOptionProxyChainName/?String=localhost"
+          curl -s "http://localhost:8080/JSON/core/action/setOptionProxyChainPort/?Integer=8080"
+          curl -s "http://localhost:8080/JSON/core/action/setOptionHandleAntiCSRFTokens/?boolean=true"
+          curl -s "http://localhost:8080/JSON/core/action/setOptionTimeoutInSecs/?Integer=300"
+          
+          # Enable debug logging
+          curl -s "http://localhost:8080/JSON/core/action/setOptionLoggingLevel/?String=DEBUG"
+
+      - name: Run tests
+        id: run_tests
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: playwright-report/results.json
+        run: |
+          if [[ "$SCAN_TYPE" == "security" || "$SCAN_TYPE" == "both" ]]; then
+            # Run security tests
+            npx playwright test tests/security.spec.ts --project=chromium --reporter=list,json
+          elif [[ "$SCAN_TYPE" == "monitoring" ]]; then
+            # Regular monitoring
+            npx playwright test tests/example.spec.ts --project=chromium --reporter=list,json
+          else
+            # Run both by default
+            npx playwright test --project=chromium --reporter=list,json
+          fi
+
+      - name: Generate ZAP Report
+        if: always() && (github.event_name == 'pull_request' || contains(fromJSON('["security", "both"]'), inputs.scan_type) || github.event.schedule == '0 2 * * 1')
+        run: |
+          # Generate HTML report
+          curl -s "http://localhost:8080/OTHER/core/other/htmlreport/" > zap-report.html
+          
+          # Generate JSON report
+          curl -s "http://localhost:8080/OTHER/core/other/jsonreport/" > zap-report.json
+          
+          # Extract high and medium risks for PR comment
+          if [[ "${{ github.event_name }}" = "pull_request" ]]; then
+            echo "### ZAP Security Scan Results" > zap-summary.md
+            echo "\`\`\`" >> zap-summary.md
+            jq -r '.site[0].alerts[] | select(.risk == "High" or .risk == "Medium") | "* [\(.risk)] \(.name) - \(.url)"' zap-report.json >> zap-summary.md || echo "No high or medium risks found" >> zap-summary.md
+            echo "\`\`\`" >> zap-summary.md
+            echo "SUMMARY<<EOF" >> $GITHUB_ENV
+            cat zap-summary.md >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
+          fi
+
+      - name: Comment PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const summary = process.env.SUMMARY;
+            if (summary) {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: summary
+              });
+            }
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ github.run_id }}
+          path: |
+            playwright-report/
+            test-results/
+            zap/
+            zap-report.*
+            .zap/
+          retention-days: 30
+
+      - name: Cleanup ZAP
+        if: always()
+        run: |
+          curl -s "http://localhost:8080/JSON/core/action/shutdown/"
