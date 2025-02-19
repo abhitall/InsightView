@@ -2,15 +2,6 @@ FROM mcr.microsoft.com/playwright:v1.42.1-focal
 
 WORKDIR /app
 
-# Install Docker client (needed for running ZAP container)
-RUN apt-get update && apt-get install -y \
-    apt-transport-https \
-    ca-certificates \
-    curl \
-    software-properties-common \
-    docker.io \
-    && rm -rf /var/lib/apt/lists/*
-
 # Copy package files
 COPY package*.json ./
 
@@ -33,6 +24,7 @@ ENV AWS_REGION=""
 ENV S3_BUCKET=""
 ENV PROMETHEUS_PUSHGATEWAY=""
 ENV TEST_URL=""
+ENV ZAP_API_URL="http://zap:8080"
 
 # Run tests and exit
 CMD ["npm", "run", "test:synthetic"]

@@ -34,14 +34,25 @@ env:
 jobs:
   synthetic-tests:
     runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.42.1-focal
     
+    services:
+      zap:
+        image: ghcr.io/zaproxy/zaproxy:stable
+        ports:
+          - 8080:8080
+        options: >-
+          --health-cmd "curl -f http://localhost:8080/ || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Run Synthetic Monitoring
         uses: ./.github/actions/synthetic-monitoring
+        env:
+          ZAP_API_URL: http://localhost:8080
         with:
           test_url: ${{ env.TEST_URL }}
           aws_access_key_id: ${{ env.AWS_ACCESS_KEY_ID }}

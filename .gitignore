@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# ZAP results
+zap-results/*
+!zap-results/.gitkeep

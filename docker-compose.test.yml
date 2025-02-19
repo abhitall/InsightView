@@ -1,6 +1,23 @@
 version: '3.8'
 
 services:
+  synthetic-monitor:
+    build: .
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_REGION=us-east-2
+      - S3_BUCKET=test-bucket
+      - PROMETHEUS_PUSHGATEWAY=http://pushgateway:9091
+      - TEST_URL=${TEST_URL}
+      - ZAP_API_URL=http://zap:8080
+    volumes:
+      - ./zap-results:/app/zap-results
+    depends_on:
+      - zap
+      - pushgateway
+      - minio
+
   minio:
     image: minio/minio
     ports:
