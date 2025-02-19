@@ -26,5 +26,13 @@ services:
     ports:
       - "9091:9091"
 
+  zap:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    volumes:
+      - ./zap-results:/zap/wrk
+    command: ["zap.sh", "-daemon", "-host", "0.0.0.0", "-port", "8080", "-config", "api.addrs.addr.name=.*", "-config", "api.addrs.addr.regex=true"]
+    ports:
+      - "8080:8080"
+
 volumes:
   minio_data:

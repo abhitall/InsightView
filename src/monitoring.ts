@@ -2,6 +2,7 @@ import { test as base } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { collectWebVitals } from './collectors/webVitals';
 import { collectTestMetrics } from './collectors/testMetrics';
+import { runZapScan } from './collectors/zapScan';
 import { PrometheusExporter } from './exporters/prometheus';
 import { S3Exporter } from './exporters/s3';
 import type { MonitoringReport } from './types';
@@ -21,9 +22,20 @@ export const test = base.extend({
 
       const testMetrics = await collectTestMetrics(page, testInfo, startTime);
       
+      const targetUrl = process.env.TEST_URL;
+      let securityScan;
+      if (targetUrl) {
+        try {
+          securityScan = await runZapScan(targetUrl);
+        } catch (error) {
+          console.error('ZAP scan failed:', error);
+        }
+      }
+
       const report: MonitoringReport = {
         webVitals,
         testMetrics,
+        securityScan,
         timestamp: Date.now(),
         environment: {
           userAgent: await page.evaluate(() => navigator.userAgent),

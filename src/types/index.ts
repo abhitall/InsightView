@@ -56,6 +56,29 @@ export interface ViewportInfo {
   height: number;
 }
 
+export interface ZapAlert {
+  risk: number;
+  confidence: number;
+  name: string;
+  description: string;
+  solution: string;
+  instances: number;
+}
+
+export interface ZapSummary {
+  high: number;
+  medium: number;
+  low: number;
+  info: number;
+}
+
+export interface ZapReport {
+  timestamp: number;
+  targetUrl: string;
+  alerts: ZapAlert[];
+  summary: ZapSummary;
+}
+
 export interface MonitoringReport {
   webVitals: WebVitalsData | WebVitalsData[];  // Updated to support single or multiple pages
   testMetrics: TestMetrics;
@@ -65,4 +88,5 @@ export interface MonitoringReport {
     viewport: ViewportInfo;
     browser: BrowserInfo;
   };
+  securityScan?: ZapReport;
 }

@@ -5,6 +5,7 @@ export class PrometheusExporter {
   private registry: Registry;
   private webVitalsGauge: Gauge;
   private testMetricsGauge: Gauge;
+  private securityMetricsGauge: Gauge;
 
   constructor() {
     this.registry = new Registry();
@@ -22,10 +23,17 @@ export class PrometheusExporter {
       labelNames: ['category', 'metric', 'test_name', 'browser', 'device', 'status'],
       registers: [this.registry],
     });
+
+    this.securityMetricsGauge = new Gauge({
+      name: 'synthetic_monitoring_security_metrics',
+      help: 'Security scan metrics from ZAP',
+      labelNames: ['severity', 'url'],
+      registers: [this.registry],
+    });
   }
 
   async export(report: MonitoringReport): Promise<void> {
-    const { webVitals, testMetrics, environment } = report;
+    const { webVitals, testMetrics, securityScan, environment } = report;
     const labels = {
       browser: environment.browser.name,
       device: environment.browser.device,
@@ -67,6 +75,26 @@ export class PrometheusExporter {
         });
       }
     });
+
+    // Export security metrics if available
+    if (securityScan) {
+      this.securityMetricsGauge.set(
+        { severity: 'high', url: securityScan.targetUrl },
+        securityScan.summary.high
+      );
+      this.securityMetricsGauge.set(
+        { severity: 'medium', url: securityScan.targetUrl },
+        securityScan.summary.medium
+      );
+      this.securityMetricsGauge.set(
+        { severity: 'low', url: securityScan.targetUrl },
+        securityScan.summary.low
+      );
+      this.securityMetricsGauge.set(
+        { severity: 'info', url: securityScan.targetUrl },
+        securityScan.summary.info
+      );
+    }
 
     await this.pushMetrics();
   }

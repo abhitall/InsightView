@@ -7,6 +7,9 @@ groups:
       - record: synthetic_monitoring:test_metrics:success_rate
         expr: sum(synthetic_monitoring_test_metrics{status="passed"}) / sum(synthetic_monitoring_test_metrics) * 100
       
+      - record: synthetic_monitoring:security_metrics:total
+        expr: sum(synthetic_monitoring_security_metrics) by (severity, url)
+
       - alert: HighWebVitalValues
         expr: synthetic_monitoring_web_vitals{metric=~"LCP|FID"} > threshold
         for: 5m
@@ -15,3 +18,12 @@ groups:
         annotations:
           summary: High Web Vital values detected
           description: "{{ $labels.metric }} is above threshold for {{ $labels.url }}"
+
+      - alert: HighSecurityFindings
+        expr: synthetic_monitoring_security_metrics{severity="high"} > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: High severity security findings detected
+          description: "{{ $value }} high severity issues found for {{ $labels.url }}"
