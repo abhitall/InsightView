@@ -53,17 +53,17 @@ jobs:
         ports:
           - 8080:8080
         options: >-
-          -e ZAP_PORT=8080
-          -e JAVA_OPTS="-Xmx4096m -Xms2048m"
-          --user zap
-          --entrypoint "sh"
-          -e ZAP_ARGS="-daemon -port 8080 -host 0.0.0.0 -config api.disablekey=false -config database.recoverylog=false -config connection.timeoutInSecs=120 -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true -config scanner.threadPerHost=4 -config view.mode=attack"
           --health-cmd "curl -sf http://localhost:8080/ > /dev/null || exit 1"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
           --health-start-period 30s
-        args: -c "zap.sh $$ZAP_ARGS"
+          --user zap
+          --entrypoint sh
+          -e ZAP_PORT=8080
+          -e JAVA_OPTS="-Xmx4096m -Xms2048m"
+          -e ZAP_ARGS="-daemon -port 8080 -host 0.0.0.0 -config api.disablekey=false -config database.recoverylog=false -config connection.timeoutInSecs=120 -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true -config scanner.threadPerHost=4 -config view.mode=attack"
+        command: ["-c", "zap.sh $${ZAP_ARGS}"]
     
     steps:
       - uses: actions/checkout@v4
