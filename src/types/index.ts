@@ -125,6 +125,7 @@ export interface ZAPScanOptions {
   includeUrls?: string[];
   scanPolicyName?: string;
   threadCount?: number;
+  maxDepth?: number;
 }
 
 export interface MonitoringOptions {
@@ -153,25 +154,48 @@ export interface ZapClientOptions {
   requestConfig?: ZapRequestConfig;
 }
 
+export interface ZapClientCore {
+  version(): Promise<string>;
+  urls(): Promise<string[]>;
+  newMessage(): Promise<string>;
+  messageResponse(messageId: string): Promise<any>;
+  messageResponseStatusCode(messageId: string): Promise<number>;
+  setOptionDefaultHeader(header: string): Promise<void>;
+  setOptionHttpStateEnabled(enabled: boolean): Promise<void>;
+  setOptionFollowRedirects(follow: boolean): Promise<void>;
+  setOptionHandleAntiCSRFTokens(handle: boolean): Promise<void>;
+  setOptionHostPerScan(count: number): Promise<void>;
+  setOptionThreadPerHost(count: number): Promise<void>;
+  setOptionMaxResponseSize(size: number): Promise<void>;
+  setOptionSingleCookieRequestHeader(enabled: boolean): Promise<void>;
+  setOptionUseHttpState(enabled: boolean): Promise<void>;
+  setOptionDefaultUserAgent(userAgent: string): Promise<void>;
+  newSession(name: string, overwrite: string): Promise<void>;
+  saveSession(name: string): Promise<void>;
+  numberOfMessages(options: { baseurl: string }): Promise<string>;
+  alertsByContext(contextName: string): Promise<any[]>;
+}
+
+export interface ZapClientSpider {
+  scan(url: string, maxChildren?: number | undefined, recurse?: boolean, contextName?: string, subtreeOnly?: boolean): Promise<string>;
+  status(scanId: string): Promise<string>;
+  stop(scanId: string): Promise<void>;
+  setOptionMaxDuration(duration: number): Promise<void>;
+  setOptionDelayInMs(delay: number): Promise<void>;
+  setOptionMaxParseSizeBytes(size: number): Promise<void>;
+}
+
+export interface ZapClientAscan {
+  scan(url: string, recurse: boolean, inScopeOnly: boolean, scanPolicyName: string, method?: string, postData?: string, options?: Record<string, any>): Promise<string>;
+  status(scanId: string): Promise<string>;
+  stop(scanId: string): Promise<void>;
+  setOptionDelayInMs(delay: number): Promise<void>;
+  setOptionMaxScanDurationInMins(duration: number): Promise<void>;
+  importScanPolicy(fileName: string): Promise<void>;
+}
+
 export interface ZapClient {
-  core: {
-    version(): Promise<string>;
-    urls(): Promise<string[]>;
-    newMessage(): Promise<string>;
-    messageResponse(messageId: string): Promise<any>;
-    messageResponseStatusCode(messageId: string): Promise<number>;
-    setOptionDefaultHeader(header: string): Promise<void>;
-    setOptionHttpStateEnabled(enabled: boolean): Promise<void>;
-    setOptionFollowRedirects(follow: boolean): Promise<void>;
-    setOptionHandleAntiCSRFTokens(handle: boolean): Promise<void>;
-    setOptionHostPerScan(count: number): Promise<void>;
-    setOptionThreadPerHost(count: number): Promise<void>;
-    setOptionMaxResponseSize(size: number): Promise<void>;
-    setOptionSingleCookieRequestHeader(enabled: boolean): Promise<void>;
-    setOptionUseHttpState(enabled: boolean): Promise<void>;
-    numberOfMessages(options: { baseurl: string }): Promise<string>;
-    alertsByContext(contextName: string): Promise<any[]>;
-  };
+  core: ZapClientCore;
   context: {
     newContext(name: string): Promise<void>;
     includeInContext(contextName: string, regex: string): Promise<void>;
@@ -179,25 +203,14 @@ export interface ZapClient {
     setContextInScope(contextName: string, inScope: boolean): Promise<void>;
     removeContext(contextName: string): Promise<void>;
   };
-  spider: {
-    scan(url: string, maxChildren?: number | undefined, recurse?: boolean, contextName?: string, subtreeOnly?: boolean): Promise<string>;
-    status(scanId: string): Promise<string>;
-    setOptionMaxDuration(duration: number): Promise<void>;
-    setOptionDelayInMs(delay: number): Promise<void>;
-    setOptionMaxParseSizeBytes(size: number): Promise<void>;
-  };
+  spider: ZapClientSpider;
   ajaxSpider: {
     scan(url: string, inScope: boolean, contextName: string, subtreeOnly: boolean): Promise<void>;
     status(): Promise<string>;
     setOptionMaxCrawlDepth(depth: number): Promise<void>;
     setOptionMaxDuration(duration: number): Promise<void>;
   };
-  ascan: {
-    scan(url: string, recurse: boolean, inScopeOnly: boolean, scanPolicyName: string, method?: string, postData?: string, options?: Record<string, any>): Promise<string>;
-    status(scanId: string): Promise<string>;
-    setOptionDelayInMs(delay: number): Promise<void>;
-    setOptionMaxScanDurationInMins(duration: number): Promise<void>;
-  };
+  ascan: ZapClientAscan;
   httpsessions: {
     createEmptySession(site: string, sessionName: string): Promise<void>;
     setActiveSession(site: string, sessionName: string): Promise<void>;

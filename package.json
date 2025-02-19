@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "test:synthetic": "playwright test",
-    "test:action": "chmod +x ./scripts/test-action.sh && ./scripts/test-action.sh",
-    "docker:test:up": "docker-compose -f docker-compose.test.yml up -d",
-    "docker:test:down": "docker-compose -f docker-compose.test.yml down -v"
+    "test:action": "scripts\\test-action.cmd",
+    "docker:test:up": "docker compose -f docker-compose.test.yml up -d --wait",
+    "docker:test:down": "docker compose -f docker-compose.test.yml down -v"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.525.0",

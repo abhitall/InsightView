@@ -45,23 +45,18 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     
     services:
       zap:
-        image: ghcr.io/zaproxy/zaproxy:stable
+        image: ghcr.io/zaproxy/zaproxy:weekly
         ports:
           - 8080:8080
         options: >-
-          --name zap
-          -v ${{ github.workspace }}/zap:/zap/wrk:rw
           -e ZAP_PORT=8080
-          -e ZAP_WEBSWING_OPTS="-host 0.0.0.0 -port 8080 -mem 4096m"
-          -e ZAP_SCRIPT_DIR=/zap/wrk/scripts
-          --health-cmd "curl -f http://localhost:8080/ || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-          --health-start-period 30s
+          -e JAVA_OPTS="-Xmx4096m"
+          --user zap
+        command: zap.sh -daemon -port 8080 -host 0.0.0.0 -config api.disablekey=false -config database.recoverylog=false -config connection.timeoutInSecs=120 -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true
     
     steps:
       - uses: actions/checkout@v4
@@ -73,96 +68,55 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: |
-          npm ci
-          npm install -g @zaproxy/zap-api-client
+        run: npm ci
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
-
-      - name: Initialize ZAP
+      - name: Wait for ZAP
         run: |
           echo "Waiting for ZAP to be ready..."
-          timeout 60s bash -c 'until curl -s http://localhost:8080/ > /dev/null; do sleep 1; done'
-          
-          # Create ZAP scripts directory
-          mkdir -p zap/scripts
-          
-          # Configure ZAP
-          curl -s "http://localhost:8080/JSON/core/action/setOptionMaxDepth/?Integer=10"
-          curl -s "http://localhost:8080/JSON/core/action/setOptionDefaultUserAgent/?String=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36"
+          attempt=1
+          max_attempts=30
+          until curl -s http://localhost:8080/ > /dev/null; do
+            if [ $attempt -eq $max_attempts ]; then
+              echo "ZAP failed to start after $max_attempts attempts"
+              exit 1
+            fi
+            echo "Attempt $attempt: ZAP not ready, waiting..."
+            sleep 2
+            attempt=$((attempt + 1))
+          done
+          echo "ZAP is ready"
+
+      - name: Configure ZAP
+        run: |
+          # Core settings
+          curl -s "http://localhost:8080/JSON/core/action/setOptionDefaultUserAgent/?String=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
           curl -s "http://localhost:8080/JSON/core/action/setOptionHttpStateEnabled/?boolean=true"
           curl -s "http://localhost:8080/JSON/core/action/setOptionUseProxyChain/?boolean=true"
-          curl -s "http://localhost:8080/JSON/core/action/setOptionProxyChainName/?String=localhost"
-          curl -s "http://localhost:8080/JSON/core/action/setOptionProxyChainPort/?Integer=8080"
-          curl -s "http://localhost:8080/JSON/core/action/setOptionHandleAntiCSRFTokens/?boolean=true"
-          curl -s "http://localhost:8080/JSON/core/action/setOptionTimeoutInSecs/?Integer=300"
           
-          # Enable debug logging
-          curl -s "http://localhost:8080/JSON/core/action/setOptionLoggingLevel/?String=DEBUG"
+          # Performance settings
+          curl -s "http://localhost:8080/JSON/core/action/setOptionThreadPerHost/?Integer=4"
+          curl -s "http://localhost:8080/JSON/spider/action/setOptionMaxDuration/?Integer=60"
+          curl -s "http://localhost:8080/JSON/ascan/action/setOptionThreadPerHost/?Integer=4"
 
       - name: Run tests
-        id: run_tests
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: playwright-report/results.json
+          ZAP_API_URL: http://localhost:8080
+          TEST_URL: ${{ secrets.TEST_URL || 'http://example.com' }}
+          SCAN_TYPE: security
         run: |
-          if [[ "$SCAN_TYPE" == "security" || "$SCAN_TYPE" == "both" ]]; then
-            # Run security tests
-            npx playwright test tests/security.spec.ts --project=chromium --reporter=list,json
-          elif [[ "$SCAN_TYPE" == "monitoring" ]]; then
-            # Regular monitoring
-            npx playwright test tests/example.spec.ts --project=chromium --reporter=list,json
-          else
-            # Run both by default
-            npx playwright test --project=chromium --reporter=list,json
-          fi
-
-      - name: Generate ZAP Report
-        if: always() && (github.event_name == 'pull_request' || contains(fromJSON('["security", "both"]'), inputs.scan_type) || github.event.schedule == '0 2 * * 1')
-        run: |
-          # Generate HTML report
-          curl -s "http://localhost:8080/OTHER/core/other/htmlreport/" > zap-report.html
-          
-          # Generate JSON report
-          curl -s "http://localhost:8080/OTHER/core/other/jsonreport/" > zap-report.json
-          
-          # Extract high and medium risks for PR comment
-          if [[ "${{ github.event_name }}" = "pull_request" ]]; then
-            echo "### ZAP Security Scan Results" > zap-summary.md
-            echo "\`\`\`" >> zap-summary.md
-            jq -r '.site[0].alerts[] | select(.risk == "High" or .risk == "Medium") | "* [\(.risk)] \(.name) - \(.url)"' zap-report.json >> zap-summary.md || echo "No high or medium risks found" >> zap-summary.md
-            echo "\`\`\`" >> zap-summary.md
-            echo "SUMMARY<<EOF" >> $GITHUB_ENV
-            cat zap-summary.md >> $GITHUB_ENV
-            echo "EOF" >> $GITHUB_ENV
-          fi
-
-      - name: Comment PR
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const summary = process.env.SUMMARY;
-            if (summary) {
-              await github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: summary
-              });
-            }
+          npx playwright install --with-deps chromium
+          npx playwright test tests/security.spec.ts --project=chromium
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ github.run_id }}
+          name: test-results
           path: |
             playwright-report/
             test-results/
-            zap/
-            zap-report.*
-            .zap/
+            zap-results.json
           retention-days: 30
 
       - name: Cleanup ZAP

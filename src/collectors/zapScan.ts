@@ -18,20 +18,76 @@ export class ZAPScanner {
       throw new Error('ZAP API URL and target URL are required');
     }
 
+    // Initialize client with error handling
+    try {
+      const options: ZapClientOptions = {
+        apiKey,
+        proxy: process.env.ZAP_PROXY_URL || 'http://localhost:8080',
+        rejectUnauthorized: false,
+        requestConfig: {
+          timeout: 120000,
+          responseEncoding: 'utf8',
+          validateStatus: (status: number) => status < 500
+        }
+      };
+
+      this.client = new (require('@zaproxy/zap-api-client').ZapClient)(zapApiUrl, options);
+      this.targetUrl = targetUrl;
+
+      // Add cleanup handler
+      process.on('beforeExit', async () => {
+        await this.cleanup().catch(error => {
+          console.error('Failed to cleanup ZAP scanner:', error);
+        });
+      });
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to initialize ZAP client: ${errorMsg}`);
+    }
+  }
+
+  private async initializeClient(zapApiUrl: string, apiKey: string) {
     const options: ZapClientOptions = {
       apiKey,
       proxy: process.env.ZAP_PROXY_URL || 'http://localhost:8080',
       rejectUnauthorized: false,
       requestConfig: {
-        timeout: 120000, // Increased timeout to 2 minutes
+        timeout: 120000,
         responseEncoding: 'utf8',
         validateStatus: (status: number) => status < 500
-      } as ZapRequestConfig
+      }
     };
-    
-    // Dynamic import of ZAP client to avoid type issues
-    this.client = new (require('@zaproxy/zap-api-client').ZapClient)(zapApiUrl, options);
-    this.targetUrl = targetUrl;
+
+    let lastError: Error | undefined;
+    for (let attempt = 1; attempt <= this.scanRetries; attempt++) {
+      try {
+        this.client = new (require('@zaproxy/zap-api-client').ZapClient)(zapApiUrl, options);
+        await this.verifyZapConnection();
+        console.log('Successfully connected to ZAP API');
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        console.warn(`ZAP connection attempt ${attempt}/${this.scanRetries} failed:`, lastError.message);
+        if (attempt < this.scanRetries) {
+          const delay = this.scanRetryDelay * attempt;
+          console.log(`Retrying in ${delay/1000} seconds...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+    throw new Error(`Failed to initialize ZAP client after ${this.scanRetries} attempts: ${lastError?.message}`);
+  }
+
+  private async verifyZapConnection(): Promise<void> {
+    try {
+      const version = await this.client.core.version();
+      if (!version) {
+        throw new Error('No version returned from ZAP API');
+      }
+      console.log(`Connected to ZAP version: ${version}`);
+    } catch (error) {
+      throw new Error(`Failed to verify ZAP connection: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private logScanStatus(phase: string, message: string): void {
@@ -72,43 +128,40 @@ export class ZAPScanner {
     throw new Error(`${name} failed after ${this.scanRetries} attempts. Last error: ${lastError?.message}`);
   }
 
-  private async verifyZapConnection(): Promise<void> {
-    try {
-      const version = await this.client.core.version();
-      this.logScanStatus('Connection', `Connected to ZAP version ${version}`);
-    } catch (error) {
-      throw new Error(`Failed to connect to ZAP: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
   private async configureZapSettings(options: ZAPScanOptions): Promise<void> {
     await this.withRetry(async () => {
-      // Basic settings
-      await this.client.core.setOptionDefaultHeader(
-        'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
+      // Weekly image may need additional time for startup
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      // Basic settings with defaults that work well with weekly image
+      await this.client.core.setOptionDefaultUserAgent(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
       );
       await this.client.core.setOptionHttpStateEnabled(true);
       await this.client.core.setOptionFollowRedirects(true);
-      await this.client.core.setOptionHandleAntiCSRFTokens(true);
 
-      // Performance settings based on options
-      const threadCount = options.threadCount || (options.maxRequestsPerSecond > 10 ? 6 : 4);
+      // Performance optimizations for weekly image
+      const threadCount = Math.min(options.threadCount || 4, 6); // Cap at 6 threads
       await this.client.core.setOptionHostPerScan(threadCount);
       await this.client.core.setOptionThreadPerHost(threadCount);
       
-      // Timeout settings
-      const maxDuration = Math.min(options.maxScanDuration, 28800); // Cap at 8 hours
-      await this.client.spider.setOptionMaxDuration(maxDuration / 60);
-      await this.client.ascan.setOptionMaxScanDurationInMins(maxDuration / 60);
-
-      // Rate limiting
-      const minDelay = Math.ceil(1000 / options.maxRequestsPerSecond);
+      // Reduced delays for weekly image's improved performance
+      const minDelay = Math.ceil(1000 / (options.maxRequestsPerSecond || 10));
       await this.client.spider.setOptionDelayInMs(minDelay);
       await this.client.ascan.setOptionDelayInMs(minDelay);
 
-      // Resource limits
-      await this.client.spider.setOptionMaxParseSizeBytes(5242880);
-      await this.client.core.setOptionMaxResponseSize(20971520);
+      // Resource limits suitable for weekly image
+      await this.client.spider.setOptionMaxParseSizeBytes(10485760); // 10MB
+      await this.client.core.setOptionMaxResponseSize(20971520); // 20MB
+
+      // Weekly image specific scan policy settings
+      if (options.scanPolicyName) {
+        try {
+          await this.client.ascan.importScanPolicy(options.scanPolicyName);
+        } catch (error) {
+          console.warn(`Failed to import scan policy ${options.scanPolicyName}, using default:`, error);
+        }
+      }
     }, 'ZAP Configuration');
   }
 
@@ -526,65 +579,70 @@ export class ZAPScanner {
     };
 
     const errors: Array<{ phase: string; message: string; timestamp: string }> = [];
+    const threadCount = Math.min(options.threadCount || 4, 6);
+    const minDelay = Math.ceil(1000 / (options.maxRequestsPerSecond || 10));
 
-    // Execute scan with rate limiting
-    await this.throttleScan(async () => {
-      await this.executePhase('Spider', async () => {
-        const spiderResult = await this.withRetry<string>(
-          async () => {
-            const result = await this.client.spider.scan(this.targetUrl, undefined, true, contextName, true);
-            if (typeof result !== 'string') {
-              throw new Error('Invalid spider scan ID returned');
+    try {
+      // Initialize scan with weekly image compatibility
+      await this.withRetry(async () => {
+        await this.client.core.newSession('', '');
+        await this.configureZapSettings(options);
+      }, 'Scan Initialization');
+
+      // Execute spider with weekly image optimizations
+      const spiderResult = await this.withRetry<string>(
+        async () => {
+          const result = await this.client.spider.scan(
+            this.targetUrl,
+            options.maxDepth || 5,
+            true,
+            contextName,
+            true
+          );
+          return result.toString();
+        },
+        'Spider Scan Start'
+      );
+
+      await this.waitForSpiderCompletion(spiderResult);
+      
+      // Execute active scan with weekly image optimizations
+      const scanResult = await this.withRetry<string>(
+        async () => {
+          const result = await this.client.ascan.scan(
+            this.targetUrl,
+            true,
+            true,
+            options.scanPolicyName || 'Default Policy',
+            undefined,
+            undefined,
+            {
+              maxDuration: options.maxScanDuration,
+              maxAlertsPerRule: isFullScan ? 0 : 10,
+              maxScansInUI: threadCount,
+              threadPerHost: threadCount,
+              delayInMs: minDelay,
+              handleAntiCSRFTokens: true
             }
-            return result;
-          },
-          'Spider Scan Start'
-        );
-        await this.waitForSpiderCompletion(spiderResult);
-      }, stats, errors);
+          );
+          return result.toString();
+        },
+        'Active Scan Start'
+      );
 
-      await this.pauseBetweenRequests(isFullScan);
+      await this.waitForScanCompletion(scanResult);
 
-      await this.executePhase('AJAX Spider', async () => {
-        await this.client.ajaxSpider.scan(this.targetUrl, true, contextName, true);
-        await this.waitForAjaxSpiderCompletion();
-      }, stats, errors);
-
-      await this.pauseBetweenRequests(isFullScan);
-
-      await this.executePhase('Active Scan', async () => {
-        const scanResult = await this.withRetry<string>(
-          async () => {
-            const result = await this.client.ascan.scan(
-              this.targetUrl,
-              true,
-              true,
-              options.scanPolicyName || (isFullScan ? 'Default Policy' : 'Light Policy'),
-              undefined,
-              undefined,
-              {
-                maxDuration: options.maxScanDuration,
-                maxAlertsPerRule: isFullScan ? 0 : 10,
-                maxScansInUI: options.threadCount || (isFullScan ? 10 : 5),
-                threadPerHost: options.threadCount || (isFullScan ? 6 : 3),
-                delayInMs: Math.ceil(1000 / options.maxRequestsPerSecond),
-                handleAntiCSRFTokens: true,
-                injectPluginIdInHeader: true
-              }
-            );
-            if (typeof result !== 'string') {
-              throw new Error('Invalid active scan ID returned');
-            }
-            return result;
-          },
-          'Active Scan Start'
-        );
-        await this.waitForScanCompletion(scanResult);
-      }, stats, errors);
-    });
-
-    // Collect results
-    return await this.collectScanResults(contextName, stats, isFullScan, errors);
+      // Collect results
+      return await this.collectScanResults(contextName, stats, isFullScan, errors);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      errors.push({
+        phase: 'Scan Execution',
+        message: errorMsg,
+        timestamp: new Date().toISOString()
+      });
+      throw error;
+    }
   }
 
   private async collectScanResults(contextName: string, stats: ZAPScanStats, isFullScan: boolean, errors: Array<{ phase: string; message: string; timestamp: string }>): Promise<ZAPScanResult> {
@@ -698,7 +756,13 @@ export class ZAPScanner {
   private async waitForSpiderCompletion(scanId: string): Promise<void> {
     await this.waitForCompletion(
       () => this.client.spider.status(scanId),
-      (status: string) => parseInt(status, 10) >= 100,
+      (status: string) => {
+        const progress = parseInt(status, 10);
+        if (isNaN(progress)) {
+          throw new Error(`Invalid spider status: ${status}`);
+        }
+        return progress >= 100;
+      },
       'Spider Scan',
       this.timeouts.spider
     );
@@ -716,9 +780,48 @@ export class ZAPScanner {
   private async waitForScanCompletion(scanId: string): Promise<void> {
     await this.waitForCompletion(
       () => this.client.ascan.status(scanId),
-      (status: string) => parseInt(status, 10) >= 100,
+      (status: string) => {
+        const progress = parseInt(status, 10);
+        if (isNaN(progress)) {
+          throw new Error(`Invalid scan status: ${status}`);
+        }
+        return progress >= 100;
+      },
       'Active Scan',
       this.timeouts.activeScan
     );
+  }
+
+  private async cleanup(): Promise<void> {
+    try {
+      // Stop any running scans
+      const spiderStatus = await this.client.spider.status('0');
+      if (spiderStatus !== '100') {
+        console.log('Stopping spider scan...');
+        await this.client.spider.stop('0');
+      }
+
+      const scanStatus = await this.client.ascan.status('0');
+      if (scanStatus !== '100') {
+        console.log('Stopping active scan...');
+        await this.client.ascan.stop('0');
+      }
+
+      // Save session if needed
+      if (process.env.ZAP_SAVE_SESSION === 'true') {
+        const sessionName = `zap-session-${Date.now()}.session`;
+        console.log(`Saving session as ${sessionName}...`);
+        await this.client.core.saveSession(sessionName);
+      }
+
+      console.log('ZAP scanner cleanup completed');
+    } catch (error) {
+      console.error('Error during ZAP scanner cleanup:', error);
+      throw error;
+    }
+  }
+
+  public async dispose(): Promise<void> {
+    await this.cleanup();
   }
 }

@@ -22,23 +22,18 @@ services:
       retries: 5
 
   zap:
-    image: ghcr.io/zaproxy/zaproxy:stable
+    image: ghcr.io/zaproxy/zaproxy:weekly
     ports:
       - "8080:8080"
     environment:
       - ZAP_PORT=8080
-      - ZAP_WEBSWING_OPTS="-host 0.0.0.0 -port 8080 -mem 4096m"
-      - ZAP_SCRIPT_DIR=/zap/wrk/scripts
-      # Allow ZAP to accept self-signed certificates
-      - JAVA_OPTS="-Xmx4096m -Dzap.checkCertificatesOnStartup=false"
-    volumes:
-      - ./zap/scripts:/zap/wrk/scripts:rw
-      - ./zap/data:/zap/wrk:rw
-    command: zap.sh -daemon -host 0.0.0.0 -port 8080 -config api.disablekey=false -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true -config connection.timeoutInSecs=600
+      - JAVA_OPTS="-Xmx4096m"
+    user: zap
+    command: zap.sh -daemon -port 8080 -host 0.0.0.0
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD-SHELL", "curl -s http://localhost:8080/ > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
       retries: 5
       start_period: 30s
     networks:
@@ -53,6 +48,7 @@ services:
 
 volumes:
   minio_data:
+  zap_data:
 
 networks:
   zap-network:
