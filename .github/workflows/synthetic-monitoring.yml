@@ -54,9 +54,16 @@ jobs:
           - 8080:8080
         options: >-
           -e ZAP_PORT=8080
-          -e JAVA_OPTS="-Xmx4096m"
+          -e JAVA_OPTS="-Xmx4096m -Xms2048m"
           --user zap
-        command: zap.sh -daemon -port 8080 -host 0.0.0.0 -config api.disablekey=false -config database.recoverylog=false -config connection.timeoutInSecs=120 -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true
+          --entrypoint "sh"
+          -e ZAP_ARGS="-daemon -port 8080 -host 0.0.0.0 -config api.disablekey=false -config database.recoverylog=false -config connection.timeoutInSecs=120 -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true -config scanner.threadPerHost=4 -config view.mode=attack"
+          --health-cmd "curl -sf http://localhost:8080/ > /dev/null || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --health-start-period 30s
+        args: -c "zap.sh $$ZAP_ARGS"
     
     steps:
       - uses: actions/checkout@v4
@@ -67,59 +74,68 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      # Cache Playwright browsers
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
       - name: Install dependencies
-        run: npm ci
-
-      - name: Wait for ZAP
         run: |
-          echo "Waiting for ZAP to be ready..."
-          attempt=1
-          max_attempts=30
-          until curl -s http://localhost:8080/ > /dev/null; do
-            if [ $attempt -eq $max_attempts ]; then
-              echo "ZAP failed to start after $max_attempts attempts"
-              exit 1
-            fi
-            echo "Attempt $attempt: ZAP not ready, waiting..."
-            sleep 2
-            attempt=$((attempt + 1))
-          done
-          echo "ZAP is ready"
+          npm ci
+          # Only install browsers if not cached
+          if [ ! -d ~/.cache/ms-playwright ]; then
+            npx playwright install --with-deps chromium
+          fi
 
-      - name: Configure ZAP
-        run: |
-          # Core settings
-          curl -s "http://localhost:8080/JSON/core/action/setOptionDefaultUserAgent/?String=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
-          curl -s "http://localhost:8080/JSON/core/action/setOptionHttpStateEnabled/?boolean=true"
-          curl -s "http://localhost:8080/JSON/core/action/setOptionUseProxyChain/?boolean=true"
-          
-          # Performance settings
-          curl -s "http://localhost:8080/JSON/core/action/setOptionThreadPerHost/?Integer=4"
-          curl -s "http://localhost:8080/JSON/spider/action/setOptionMaxDuration/?Integer=60"
-          curl -s "http://localhost:8080/JSON/ascan/action/setOptionThreadPerHost/?Integer=4"
+      # Use our composite action for ZAP setup
+      - name: Setup ZAP
+        uses: ./.github/actions/setup-zap
+        id: zap-setup
+        with:
+          zap-api-url: ${{ env.ZAP_API_URL }}
+          max-retries: '30'
 
+      # Use our composite action for test execution
       - name: Run tests
-        env:
-          PLAYWRIGHT_JSON_OUTPUT_NAME: playwright-report/results.json
-          ZAP_API_URL: http://localhost:8080
-          TEST_URL: ${{ secrets.TEST_URL || 'http://example.com' }}
-          SCAN_TYPE: security
-        run: |
-          npx playwright install --with-deps chromium
-          npx playwright test tests/security.spec.ts --project=chromium
+        if: steps.zap-setup.outputs.zap-status == 'ready'
+        uses: ./.github/actions/run-tests
+        id: test-run
+        with:
+          test-url: ${{ env.TEST_URL || secrets.TEST_URL || 'http://example.com' }}
+          scan-type: ${{ env.SCAN_TYPE }}
+          browser: 'chromium'
+          test-spec: 'tests/security.spec.ts'
+          retries: '2'
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: test-results-${{ github.run_id }}
           path: |
             playwright-report/
             test-results/
             zap-results.json
           retention-days: 30
+          if-no-files-found: warn
+
+      - name: Handle test failure
+        if: steps.test-run.outputs.test-status == 'failure'
+        run: |
+          echo "::error::Some tests failed. Check the test results for details."
+          exit 1
 
       - name: Cleanup ZAP
         if: always()
         run: |
-          curl -s "http://localhost:8080/JSON/core/action/shutdown/"
+          # Gracefully stop active scans first
+          curl -sf "${{ env.ZAP_API_URL }}/JSON/ascan/action/stopAllScans/" || true
+          curl -sf "${{ env.ZAP_API_URL }}/JSON/spider/action/stopAllScans/" || true
+          sleep 2
+          # Shutdown ZAP
+          curl -sf "${{ env.ZAP_API_URL }}/JSON/core/action/shutdown/" || true
+          sleep 5

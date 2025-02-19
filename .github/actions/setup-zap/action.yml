@@ -1,0 +1,59 @@
+name: 'Setup ZAP'
+description: 'Sets up and configures OWASP ZAP for security scanning'
+
+inputs:
+  zap-api-url:
+    description: 'ZAP API URL'
+    required: false
+    default: 'http://localhost:8080'
+  max-retries:
+    description: 'Maximum number of retries for ZAP readiness check'
+    required: false
+    default: '30'
+
+outputs:
+  zap-status:
+    description: 'Status of ZAP setup'
+    value: ${{ steps.verify-zap.outputs.status }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Verify ZAP readiness
+      id: verify-zap
+      shell: bash
+      run: |
+        echo "Waiting for ZAP to be ready..."
+        attempt=1
+        max_attempts=${{ inputs.max-retries }}
+        until curl -sf ${{ inputs.zap-api-url }}/ > /dev/null; do
+          if [ $attempt -eq $max_attempts ]; then
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "ZAP failed to start after $max_attempts attempts"
+            exit 1
+          fi
+          echo "Attempt $attempt: ZAP not ready, waiting..."
+          sleep 2
+          attempt=$((attempt + 1))
+        done
+        echo "status=ready" >> $GITHUB_OUTPUT
+        echo "ZAP is ready"
+
+    - name: Configure ZAP
+      shell: bash
+      run: |
+        # Core settings
+        curl -sf "${{ inputs.zap-api-url }}/JSON/core/action/setOptionDefaultUserAgent/?String=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
+        curl -sf "${{ inputs.zap-api-url }}/JSON/core/action/setOptionHttpStateEnabled/?boolean=true"
+        curl -sf "${{ inputs.zap-api-url }}/JSON/core/action/setOptionUseProxyChain/?boolean=true"
+        
+        # Performance settings
+        curl -sf "${{ inputs.zap-api-url }}/JSON/core/action/setOptionThreadPerHost/?Integer=4"
+        curl -sf "${{ inputs.zap-api-url }}/JSON/spider/action/setOptionMaxDuration/?Integer=60"
+        curl -sf "${{ inputs.zap-api-url }}/JSON/ascan/action/setOptionThreadPerHost/?Integer=4"
+        curl -sf "${{ inputs.zap-api-url }}/JSON/core/action/setOptionMaxResponseSize/?Integer=20971520"
+        curl -sf "${{ inputs.zap-api-url }}/JSON/spider/action/setOptionMaxParseSizeBytes/?Integer=10485760"
+
+        # Reliability settings
+        curl -sf "${{ inputs.zap-api-url }}/JSON/core/action/setOptionTimeoutInSecs/?Integer=120"
+        curl -sf "${{ inputs.zap-api-url }}/JSON/core/action/setOptionMaximumAlertInstances/?Integer=100"

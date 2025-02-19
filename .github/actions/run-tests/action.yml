@@ -1,0 +1,70 @@
+name: 'Run Synthetic Tests'
+description: 'Execute synthetic monitoring and security tests'
+
+inputs:
+  test-url:
+    description: 'Target URL to test'
+    required: true
+  scan-type:
+    description: 'Type of scan to run'
+    required: false
+    default: 'both'
+  browser:
+    description: 'Browser to use for testing'
+    required: false
+    default: 'chromium'
+  test-spec:
+    description: 'Test specification file to run'
+    required: false
+    default: 'tests/security.spec.ts'
+  retries:
+    description: 'Number of test retries'
+    required: false
+    default: '2'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup test environment
+      shell: bash
+      run: |
+        # Ensure output directories exist
+        mkdir -p playwright-report test-results
+        # Set environment variables
+        echo "PLAYWRIGHT_JSON_OUTPUT_NAME=playwright-report/results.json" >> $GITHUB_ENV
+
+    - name: Run tests
+      shell: bash
+      run: |
+        # Run tests with configured retries and single worker for stability
+        npx playwright test ${{ inputs.test-spec }} \
+          --project=${{ inputs.browser }} \
+          --retries=${{ inputs.retries }} \
+          --workers=1 \
+          --reporter=html,json \
+          || (echo "::warning::Tests failed but continuing with results upload" && true)
+
+    - name: Process test results
+      id: process-results
+      shell: bash
+      run: |
+        if [ -f "playwright-report/results.json" ]; then
+          # Extract and summarize test results
+          echo "Total tests: $(jq '.suites[].specs | length' playwright-report/results.json | awk '{sum+=$1} END{print sum}')"
+          echo "Failed tests: $(jq '[.suites[].specs[].tests[].results[].status] | map(select(. == "failed")) | length' playwright-report/results.json)"
+          
+          # Set status output
+          if jq -e '[.suites[].specs[].tests[].results[].status] | map(select(. == "failed")) | length == 0' playwright-report/results.json > /dev/null; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "::error::No test results found"
+          echo "status=error" >> $GITHUB_OUTPUT
+        fi
+
+outputs:
+  test-status:
+    description: 'Status of test execution'
+    value: ${{ steps.process-results.outputs.status }}
