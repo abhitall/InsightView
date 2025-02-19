@@ -1,3 +1,5 @@
+import { exec } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import type { ZapReport } from '../types';
 
 export async function runZapScan(targetUrl: string): Promise<ZapReport> {
@@ -6,7 +8,6 @@ export async function runZapScan(targetUrl: string): Promise<ZapReport> {
   
   // Run ZAP scan in container
   await new Promise((resolve, reject) => {
-    const { exec } = require('child_process');
     const cmd = `docker run --rm --name ${containerName} \
       -v "$(pwd)/zap-results:/zap/wrk" \
       -t ghcr.io/zaproxy/zaproxy:stable \
@@ -26,8 +27,7 @@ export async function runZapScan(targetUrl: string): Promise<ZapReport> {
   });
 
   // Read and parse the report
-  const fs = require('fs');
-  const report = JSON.parse(fs.readFileSync('./zap-results/report.json', 'utf8'));
+  const report = JSON.parse(readFileSync('./zap-results/report.json', 'utf8'));
 
   return {
     timestamp: Date.now(),
