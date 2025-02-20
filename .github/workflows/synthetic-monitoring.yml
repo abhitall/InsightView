@@ -48,8 +48,8 @@ jobs:
           --health-timeout 5s
           --health-retries 10
           --health-start-period 30s
-          --entrypoint /zap/zap-baseline.py
-          "-I"
+          --entrypoint /usr/bin/env
+          --cmd "zap-x.sh -daemon -host 0.0.0.0 -port 8080"
 
     steps:
       - uses: actions/checkout@v4
