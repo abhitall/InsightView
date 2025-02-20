@@ -124,7 +124,7 @@ runs:
       continue-on-error: true
       with:
         target: ${{ inputs.test_url }}
-        rules_file_name: ${{ github.action_path }}/.zap/rules-config.tsv
+        rules_file_name: '.zap/rules-config.tsv'
         cmd_options: '-a'
         allow_issue_writing: true
         fail_action: false
