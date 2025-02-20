@@ -37,7 +37,7 @@ jobs:
     
     services:
       zap:
-        image: softwaresecurityproject/zap-stable:latest
+        image: ghcr.io/zaproxy/zaproxy:stable
         ports:
           - 8080:8080
         env:
@@ -48,14 +48,15 @@ jobs:
           --health-timeout 5s
           --health-retries 10
           --health-start-period 30s
-          --user root
+          --entrypoint /zap/zap-full-scan.py
+          --cmd "-I -j"
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Start ZAP
+      - name: Wait for ZAP
+        timeout-minutes: 2
         run: |
-          docker exec $(docker ps -q --filter ancestor=softwaresecurityproject/zap-stable) zap.sh -daemon -host 0.0.0.0 -port 8080 -config api.disablekey=true &
           echo "Waiting for ZAP to be ready..."
           for i in {1..12}; do
             if curl -sf http://localhost:8080/JSON/core/view/version/ > /dev/null; then
