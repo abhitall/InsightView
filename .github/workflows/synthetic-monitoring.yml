@@ -36,6 +36,10 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: mcr.microsoft.com/playwright:v1.42.1-focal
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     
     steps:
       - uses: actions/checkout@v4
@@ -51,34 +55,3 @@ jobs:
           prometheus_pushgateway: ${{ env.PROMETHEUS_PUSHGATEWAY }}
           browser: ${{ inputs.browser || 'chromium' }}
           env_vars: ${{ inputs.env_vars }}
-
-  zap-scan:
-    needs: synthetic-tests
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
-    
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: ZAP Scan
-        uses: zaproxy/action-baseline@v0.11.0
-        with:
-          target: ${{ env.TEST_URL }}
-          rules_file_name: '.zap/rules-config.tsv'
-          cmd_options: '-a'
-          allow_issue_writing: true
-          fail_action: false  # Don't fail the workflow on alerts
-
-      - name: Upload ZAP Report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: zap-scan-report
-          path: |
-            report_html.html
-            report_md.md
-            report_json.json
-          retention-days: 30

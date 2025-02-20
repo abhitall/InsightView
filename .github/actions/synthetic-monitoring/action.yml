@@ -123,12 +123,24 @@ runs:
           npm run test:synthetic -- --project=${{ inputs.browser }}
         fi
 
-    - name: Upload Playwright report
+    - name: Run ZAP Scan
+      uses: zaproxy/action-baseline@v0.11.0
+      with:
+        target: ${{ inputs.test_url }}
+        rules_file_name: '.zap/rules-config.tsv'
+        cmd_options: '-a'
+        allow_issue_writing: true
+        fail_action: false
+
+    - name: Upload Reports
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: playwright-report-${{ github.run_id }}
+        name: monitoring-reports-${{ github.run_id }}
         path: |
           playwright-report/
           test-results/
+          report_html.html
+          report_md.md
+          report_json.json
         retention-days: 30
