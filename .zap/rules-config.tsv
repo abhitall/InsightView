@@ -1,0 +1,14 @@
+# Exclude certain alerts by ID
+10016	IGNORE	# Web Browser XSS Protection Not Enabled
+10021	IGNORE	# X-Content-Type-Options Header Missing
+10015	IGNORE	# Incomplete or No Cache-control Header Set
+10020	IGNORE	# X-Frame-Options Header Not Set
+10038	IGNORE	# Content Security Policy (CSP) Header Not Set
+10063	IGNORE	# Feature Policy Header Not Set
+
+# Set Risk Levels
+# RISK: 3=High, 2=Medium, 1=Low, 0=Informational
+3	FAIL	# High Risk - Fail the scan
+2	WARN	# Medium Risk - Warn but don't fail
+1	WARN	# Low Risk - Warn but don't fail
+0	IGNORE	# Informational - Ignore
