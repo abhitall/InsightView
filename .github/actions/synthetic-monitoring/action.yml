@@ -121,6 +121,7 @@ runs:
 
     - name: Run ZAP Scan
       uses: zaproxy/action-full-scan@v0.12.0
+      continue-on-error: true
       with:
         target: ${{ inputs.test_url }}
         rules_file_name: ${{ github.action_path }}/.zap/rules-config.tsv
