@@ -82,7 +82,6 @@ runs:
     - name: Setup environment
       shell: bash
       run: |
-        # Infrastructure secrets
         cat << EOF > .env
         AWS_ACCESS_KEY_ID=${{ inputs.aws_access_key_id }}
         AWS_SECRET_ACCESS_KEY=${{ inputs.aws_secret_access_key }}
@@ -90,7 +89,6 @@ runs:
         S3_BUCKET=${{ inputs.s3_bucket }}
         EOF
 
-        # Only add S3 endpoint configuration for non-AWS S3 services
         if [ ! -z "${{ inputs.s3_endpoint }}" ]; then
           cat << EOF >> .env
         S3_ENDPOINT=${{ inputs.s3_endpoint }}
@@ -99,13 +97,11 @@ runs:
         EOF
         fi
 
-        # Add remaining configuration
         cat << EOF >> .env
         PROMETHEUS_PUSHGATEWAY=${{ inputs.prometheus_pushgateway }}
         TEST_URL=${{ inputs.test_url }}
         EOF
 
-        # Add custom environment variables if provided
         if [ ! -z "${{ inputs.env_vars }}" ]; then
           echo "${{ inputs.env_vars }}" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' >> .env
         fi
@@ -117,7 +113,7 @@ runs:
     - name: Setup ZAP Rules
       shell: bash
       run: |
-        cat << 'EOF' > rules-config.tsv
+        cat > rules-config.tsv << 'ZAPEOF'
 # Exclude certain alerts by ID
 10016	IGNORE	# Web Browser XSS Protection Not Enabled
 10021	IGNORE	# X-Content-Type-Options Header Missing
@@ -132,7 +128,7 @@ runs:
 2	WARN	# Medium Risk - Warn but don't fail
 1	WARN	# Low Risk - Warn but don't fail
 0	IGNORE	# Informational - Ignore
-EOF
+ZAPEOF
 
     - name: Run synthetic tests
       shell: bash
@@ -147,7 +143,7 @@ EOF
       uses: zaproxy/action-baseline@v0.11.0
       with:
         target: ${{ inputs.test_url }}
-        rules_file_name: 'rules-config.tsv'
+        rules_file_name: rules-config.tsv
         cmd_options: '-a'
         allow_issue_writing: true
         fail_action: false
