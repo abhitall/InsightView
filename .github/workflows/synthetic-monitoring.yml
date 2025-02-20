@@ -55,3 +55,13 @@ jobs:
           prometheus_pushgateway: ${{ env.PROMETHEUS_PUSHGATEWAY }}
           browser: ${{ inputs.browser || 'chromium' }}
           env_vars: ${{ inputs.env_vars }}
+
+      - name: ZAP Scan
+        uses: zaproxy/action-baseline@v0.14.0
+        continue-on-error: true
+        with:
+          target: ${{ env.TEST_URL }}
+          rules_file_name: '.zap/rules-config.tsv'
+          cmd_options: '-a'
+          allow_issue_writing: true
+          fail_action: false  # Don't fail the workflow on alerts
