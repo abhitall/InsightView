@@ -37,36 +37,25 @@ jobs:
     
     services:
       zap:
-        image: ghcr.io/zaproxy/zaproxy:stable
+        image: softwaresecurityproject/zap-stable:latest
         ports:
           - 8080:8080
         env:
           JAVA_OPTS: "-Xmx512m -Djava.awt.headless=true"
         options: >-
-          --entrypoint /zap/zap.sh
           --health-cmd "curl -f http://localhost:8080/JSON/core/view/version/ || exit 1"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
           --health-start-period 30s
+          --user root
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup ZAP environment
+      - name: Start ZAP
         run: |
-          sudo mkdir -p /tmp/zap
-          sudo chown -R 1000:1000 /tmp/zap
-          sudo chmod -R 777 /tmp/zap
-
-      - name: Configure ZAP
-        run: |
-          docker exec $(docker ps -q --filter "name=zap") /zap/zap.sh -daemon -host 0.0.0.0 -port 8080 &
-          sleep 10
-
-      - name: Wait for ZAP
-        timeout-minutes: 2
-        run: |
+          docker exec $(docker ps -q --filter ancestor=softwaresecurityproject/zap-stable) zap.sh -daemon -host 0.0.0.0 -port 8080 -config api.disablekey=true &
           echo "Waiting for ZAP to be ready..."
           for i in {1..12}; do
             if curl -sf http://localhost:8080/JSON/core/view/version/ > /dev/null; then
