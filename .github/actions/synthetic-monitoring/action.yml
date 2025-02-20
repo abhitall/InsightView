@@ -120,11 +120,12 @@ runs:
         fi
 
     - name: Run ZAP Scan
-      uses: zaproxy/action-baseline@v0.14.0
+      uses: zaproxy/action-bas@v0.14.0
       with:
         target: ${{ inputs.test_url }}
         rules_file_name: ${{ github.action_path }}/.zap/rules-config.tsv
-        allow_issue_writing: true
+        cmd_options: -a
+        allow_issue_writing: false
         fail_action: false
 
     - name: Upload Reports
