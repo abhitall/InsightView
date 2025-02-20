@@ -114,6 +114,12 @@ runs:
       shell: bash
       run: mkdir -p playwright-report test-results
 
+    - name: Copy ZAP Rules
+      shell: bash
+      run: |
+        mkdir -p .zap
+        cp ${{ github.action_path }}/.zap/rules-config.tsv .zap/
+
     - name: Run synthetic tests
       shell: bash
       run: |
