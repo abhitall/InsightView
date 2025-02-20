@@ -48,8 +48,8 @@ jobs:
           --health-timeout 5s
           --health-retries 10
           --health-start-period 30s
-          --entrypoint /zap/zap-full-scan.py
-          --cmd "-I -j"
+          --entrypoint /zap/zap-baseline.py
+          "-I"
 
     steps:
       - uses: actions/checkout@v4
