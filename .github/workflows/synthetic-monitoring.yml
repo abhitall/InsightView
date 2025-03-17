@@ -77,7 +77,7 @@ jobs:
           allow_issue_writing: true
           fail_action: false  # Don't fail the workflow on alerts
 
-      - name: Upload ZAP Report
+      - name: Upload ZAP Report as Artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -87,3 +87,19 @@ jobs:
             report_md.md
             report_json.json
           retention-days: 30
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Process ZAP Reports
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+          S3_BUCKET: ${{ env.S3_BUCKET }}
+        run: npx ts-node scripts/process-zap-reports.ts

@@ -15,3 +15,29 @@ groups:
         annotations:
           summary: High Web Vital values detected
           description: "{{ $labels.metric }} is above threshold for {{ $labels.url }}"
+
+  - name: security-monitoring
+    rules:
+      - record: security:vulnerabilities:by_severity
+        expr: sum(security_vulnerabilities) by (severity, target_url)
+        
+      - record: security:vulnerabilities:total
+        expr: security_vulnerabilities{severity="total"}
+        
+      - alert: HighRiskVulnerabilities
+        expr: security_vulnerabilities{severity="high"} > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: High risk security vulnerabilities detected
+          description: "{{ $value }} high risk vulnerabilities found in {{ $labels.target_url }}"
+          
+      - alert: MediumRiskVulnerabilities
+        expr: security_vulnerabilities{severity="medium"} > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Medium risk security vulnerabilities detected
+          description: "{{ $value }} medium risk vulnerabilities found in {{ $labels.target_url }}"
