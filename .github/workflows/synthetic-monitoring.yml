@@ -101,7 +101,8 @@ jobs:
           node-version: '20'
           
       - name: Install dependencies
-        run: npm ci
+        # Using npm install instead of npm ci to install dependencies without requiring a package-lock.json file
+        run: npm install
         
       - name: Process ZAP Reports and Send to Prometheus
         env:
