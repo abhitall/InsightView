@@ -77,26 +77,36 @@ export class ZapReporter {
           
           if (site.alerts) {
             site.alerts.forEach(alert => {
+              // Ensure count is a number (parse it if it's a string)
+              const alertCount = parseInt(alert.count, 10) || 0;
+              
               // Risk codes: 0=Informational, 1=Low, 2=Medium, 3=High
               switch (alert.riskcode) {
                 case '3':
-                  counts.high += alert.count;
+                  counts.high += alertCount;
                   break;
                 case '2':
-                  counts.medium += alert.count;
+                  counts.medium += alertCount;
                   break;
                 case '1':
-                  counts.low += alert.count;
+                  counts.low += alertCount;
                   break;
                 case '0':
-                  counts.informational += alert.count;
+                  counts.informational += alertCount;
                   break;
               }
-              counts.total += alert.count;
+              counts.total += alertCount;
             });
           }
         });
       }
+
+      // Ensure all count values are numbers (not strings)
+      counts.high = parseInt(counts.high, 10) || 0;
+      counts.medium = parseInt(counts.medium, 10) || 0;
+      counts.low = parseInt(counts.low, 10) || 0;
+      counts.informational = parseInt(counts.informational, 10) || 0;
+      counts.total = parseInt(counts.total, 10) || 0;
 
       console.log('ZAP Vulnerability Counts:', counts);
       return counts;
@@ -168,12 +178,23 @@ export class ZapReporter {
 
       console.log(`Using Prometheus Pushgateway URL: ${pushgatewayUrl}`);
 
+      // Ensure all counts are numbers
+      const numericCounts = {
+        high: Number(counts.high) || 0,
+        medium: Number(counts.medium) || 0,
+        low: Number(counts.low) || 0,
+        informational: Number(counts.informational) || 0,
+        total: Number(counts.total) || 0
+      };
+
+      console.log('Numeric vulnerability counts for Prometheus:', numericCounts);
+
       // Set vulnerability counts as Prometheus metrics
-      this.securityVulnerabilitiesGauge.set({ severity: 'high', target_url: this.targetUrl }, counts.high);
-      this.securityVulnerabilitiesGauge.set({ severity: 'medium', target_url: this.targetUrl }, counts.medium);
-      this.securityVulnerabilitiesGauge.set({ severity: 'low', target_url: this.targetUrl }, counts.low);
-      this.securityVulnerabilitiesGauge.set({ severity: 'informational', target_url: this.targetUrl }, counts.informational);
-      this.securityVulnerabilitiesGauge.set({ severity: 'total', target_url: this.targetUrl }, counts.total);
+      this.securityVulnerabilitiesGauge.set({ severity: 'high', target_url: this.targetUrl }, numericCounts.high);
+      this.securityVulnerabilitiesGauge.set({ severity: 'medium', target_url: this.targetUrl }, numericCounts.medium);
+      this.securityVulnerabilitiesGauge.set({ severity: 'low', target_url: this.targetUrl }, numericCounts.low);
+      this.securityVulnerabilitiesGauge.set({ severity: 'informational', target_url: this.targetUrl }, numericCounts.informational);
+      this.securityVulnerabilitiesGauge.set({ severity: 'total', target_url: this.targetUrl }, numericCounts.total);
 
       // Get metrics in Prometheus format
       const metrics = await this.registry.metrics();
@@ -232,6 +253,15 @@ export class ZapReporter {
       throw new Error('PROMETHEUS_PUSHGATEWAY environment variable not set');
     }
     
+    // Ensure all counts are numbers
+    const numericCounts = {
+      high: Number(counts.high) || 0,
+      medium: Number(counts.medium) || 0,
+      low: Number(counts.low) || 0,
+      informational: Number(counts.informational) || 0,
+      total: Number(counts.total) || 0
+    };
+    
     // Use the same job name as synthetic monitoring for consistency
     const normalizedUrl = pushgatewayUrl.endsWith('/')
       ? `${pushgatewayUrl}metrics/job/synthetic_monitoring`
@@ -246,13 +276,14 @@ export class ZapReporter {
     metricsText += '# TYPE security_vulnerabilities_count gauge\n';
     
     // Add metrics with labels
-    metricsText += `security_vulnerabilities_count{severity="high",target_url="${this.targetUrl}"} ${counts.high} ${timestamp}000\n`;
-    metricsText += `security_vulnerabilities_count{severity="medium",target_url="${this.targetUrl}"} ${counts.medium} ${timestamp}000\n`;
-    metricsText += `security_vulnerabilities_count{severity="low",target_url="${this.targetUrl}"} ${counts.low} ${timestamp}000\n`;
-    metricsText += `security_vulnerabilities_count{severity="informational",target_url="${this.targetUrl}"} ${counts.informational} ${timestamp}000\n`;
-    metricsText += `security_vulnerabilities_count{severity="total",target_url="${this.targetUrl}"} ${counts.total} ${timestamp}000\n`;
+    metricsText += `security_vulnerabilities_count{severity="high",target_url="${this.targetUrl}"} ${numericCounts.high} ${timestamp}000\n`;
+    metricsText += `security_vulnerabilities_count{severity="medium",target_url="${this.targetUrl}"} ${numericCounts.medium} ${timestamp}000\n`;
+    metricsText += `security_vulnerabilities_count{severity="low",target_url="${this.targetUrl}"} ${numericCounts.low} ${timestamp}000\n`;
+    metricsText += `security_vulnerabilities_count{severity="informational",target_url="${this.targetUrl}"} ${numericCounts.informational} ${timestamp}000\n`;
+    metricsText += `security_vulnerabilities_count{severity="total",target_url="${this.targetUrl}"} ${numericCounts.total} ${timestamp}000\n`;
     
-    console.log('Sending alternative metrics format to Prometheus');
+    console.log('Sending alternative metrics format to Prometheus:');
+    console.log(metricsText);
     
     const response = await fetch(normalizedUrl, {
       method: 'POST',
@@ -263,7 +294,8 @@ export class ZapReporter {
     });
     
     if (!response.ok) {
-      throw new Error(`Alternative approach failed: ${response.status} ${response.statusText}`);
+      const responseText = await response.text();
+      throw new Error(`Alternative approach failed: ${response.status} ${response.statusText}\nResponse: ${responseText}`);
     }
     
     console.log('Alternative metrics successfully sent to Prometheus');
