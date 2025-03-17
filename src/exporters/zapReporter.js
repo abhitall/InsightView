@@ -166,6 +166,8 @@ export class ZapReporter {
         throw new Error('PROMETHEUS_PUSHGATEWAY environment variable not set');
       }
 
+      console.log(`Using Prometheus Pushgateway URL: ${pushgatewayUrl}`);
+
       // Set vulnerability counts as Prometheus metrics
       this.securityVulnerabilitiesGauge.set({ severity: 'high', target_url: this.targetUrl }, counts.high);
       this.securityVulnerabilitiesGauge.set({ severity: 'medium', target_url: this.targetUrl }, counts.medium);
@@ -176,20 +178,95 @@ export class ZapReporter {
       // Get metrics in Prometheus format
       const metrics = await this.registry.metrics();
       
-      // Push metrics to Pushgateway
-      const response = await fetch(`${pushgatewayUrl}/metrics/job/security_scan`, {
+      console.log('Prepared metrics for Prometheus:');
+      console.log(metrics.substring(0, 200) + '...'); // Log first part of metrics to avoid huge logs
+      
+      // Fix potential trailing slashes in URL
+      const normalizedUrl = pushgatewayUrl.endsWith('/')
+        ? `${pushgatewayUrl}metrics/job/security_scan`
+        : `${pushgatewayUrl}/metrics/job/security_scan`;
+      
+      console.log(`Sending metrics to: ${normalizedUrl}`);
+      
+      // Add timestamp to job name to avoid metrics overwriting each other
+      const timestamp = new Date().getTime();
+      const jobUrl = `${normalizedUrl}/${timestamp}`;
+      
+      // Add more detailed request options and proper error handling
+      const response = await fetch(jobUrl, {
         method: 'POST',
         body: metrics,
+        headers: {
+          'Content-Type': 'text/plain',
+        },
+        timeout: 10000 // 10 second timeout
       });
-
+      
       if (!response.ok) {
-        throw new Error(`Failed to push metrics: ${response.status} ${response.statusText}`);
+        const responseText = await response.text();
+        throw new Error(`Failed to push metrics: ${response.status} ${response.statusText}\nResponse: ${responseText}`);
       }
       
-      console.log('Security vulnerability metrics sent to Prometheus successfully');
+      console.log(`Security vulnerability metrics sent to Prometheus successfully (${response.status} ${response.statusText})`);
     } catch (error) {
       console.error('Error sending metrics to Prometheus:', error.message);
+      console.error('Full error:', error);
+      
+      // Try alternative approach as fallback
+      try {
+        console.log('Trying alternative approach for sending metrics...');
+        await this.sendMetricsToPrometheusAlternative(counts);
+      } catch (fallbackError) {
+        console.error('Alternative approach also failed:', fallbackError.message);
+      }
     }
+  }
+  
+  /**
+   * Alternative method to send metrics to Prometheus using the same endpoint 
+   * used by synthetic monitoring
+   */
+  async sendMetricsToPrometheusAlternative(counts) {
+    const pushgatewayUrl = process.env.PROMETHEUS_PUSHGATEWAY;
+    if (!pushgatewayUrl) {
+      throw new Error('PROMETHEUS_PUSHGATEWAY environment variable not set');
+    }
+    
+    // Use the same job name as synthetic monitoring for consistency
+    const normalizedUrl = pushgatewayUrl.endsWith('/')
+      ? `${pushgatewayUrl}metrics/job/synthetic_monitoring`
+      : `${pushgatewayUrl}/metrics/job/synthetic_monitoring`;
+    
+    // Manually format metrics in Prometheus format for simplicity
+    const timestamp = Math.floor(Date.now() / 1000);
+    let metricsText = '';
+    
+    // Add type and help info
+    metricsText += '# HELP security_vulnerabilities_count Security vulnerabilities found by ZAP scan\n';
+    metricsText += '# TYPE security_vulnerabilities_count gauge\n';
+    
+    // Add metrics with labels
+    metricsText += `security_vulnerabilities_count{severity="high",target_url="${this.targetUrl}"} ${counts.high} ${timestamp}000\n`;
+    metricsText += `security_vulnerabilities_count{severity="medium",target_url="${this.targetUrl}"} ${counts.medium} ${timestamp}000\n`;
+    metricsText += `security_vulnerabilities_count{severity="low",target_url="${this.targetUrl}"} ${counts.low} ${timestamp}000\n`;
+    metricsText += `security_vulnerabilities_count{severity="informational",target_url="${this.targetUrl}"} ${counts.informational} ${timestamp}000\n`;
+    metricsText += `security_vulnerabilities_count{severity="total",target_url="${this.targetUrl}"} ${counts.total} ${timestamp}000\n`;
+    
+    console.log('Sending alternative metrics format to Prometheus');
+    
+    const response = await fetch(normalizedUrl, {
+      method: 'POST',
+      body: metricsText,
+      headers: {
+        'Content-Type': 'text/plain',
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Alternative approach failed: ${response.status} ${response.statusText}`);
+    }
+    
+    console.log('Alternative metrics successfully sent to Prometheus');
   }
 
   /**
