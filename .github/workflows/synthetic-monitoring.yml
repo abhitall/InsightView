@@ -101,8 +101,8 @@ jobs:
           node-version: '20'
           
       - name: Install dependencies
-        # Now using npm ci since we have a proper package-lock.json file
-        run: npm ci
+        # Using npm install instead of npm ci to handle missing package-lock.json entries
+        run: npm install
         
       - name: Process ZAP Reports and Send to Prometheus
         env:
