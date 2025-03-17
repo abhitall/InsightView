@@ -202,19 +202,16 @@ export class ZapReporter {
       console.log('Prepared metrics for Prometheus:');
       console.log(metrics.substring(0, 200) + '...'); // Log first part of metrics to avoid huge logs
       
-      // Fix potential trailing slashes in URL
+      // Fix potential trailing slashes in URL and create the job URL
+      // Don't append timestamp as part of the URL path
       const normalizedUrl = pushgatewayUrl.endsWith('/')
         ? `${pushgatewayUrl}metrics/job/security_scan`
         : `${pushgatewayUrl}/metrics/job/security_scan`;
       
       console.log(`Sending metrics to: ${normalizedUrl}`);
       
-      // Add timestamp to job name to avoid metrics overwriting each other
-      const timestamp = new Date().getTime();
-      const jobUrl = `${normalizedUrl}/${timestamp}`;
-      
       // Add more detailed request options and proper error handling
-      const response = await fetch(jobUrl, {
+      const response = await fetch(normalizedUrl, {
         method: 'POST',
         body: metrics,
         headers: {
@@ -229,6 +226,7 @@ export class ZapReporter {
       }
       
       console.log(`Security vulnerability metrics sent to Prometheus successfully (${response.status} ${response.statusText})`);
+      return true;
     } catch (error) {
       console.error('Error sending metrics to Prometheus:', error.message);
       console.error('Full error:', error);
@@ -236,9 +234,10 @@ export class ZapReporter {
       // Try alternative approach as fallback
       try {
         console.log('Trying alternative approach for sending metrics...');
-        await this.sendMetricsToPrometheusAlternative(counts);
+        return await this.sendMetricsToPrometheusAlternative(counts);
       } catch (fallbackError) {
         console.error('Alternative approach also failed:', fallbackError.message);
+        return false;
       }
     }
   }
@@ -264,23 +263,23 @@ export class ZapReporter {
     
     // Use the same job name as synthetic monitoring for consistency
     const normalizedUrl = pushgatewayUrl.endsWith('/')
-      ? `${pushgatewayUrl}metrics/job/synthetic_monitoring`
-      : `${pushgatewayUrl}/metrics/job/synthetic_monitoring`;
+      ? `${pushgatewayUrl}metrics/job/synthetic_monitoring/instance/security_scan`
+      : `${pushgatewayUrl}/metrics/job/synthetic_monitoring/instance/security_scan`;
     
     // Manually format metrics in Prometheus format for simplicity
-    const timestamp = Math.floor(Date.now() / 1000);
+    // IMPORTANT: Don't include timestamps as the Pushgateway doesn't want them
     let metricsText = '';
     
     // Add type and help info
     metricsText += '# HELP security_vulnerabilities_count Security vulnerabilities found by ZAP scan\n';
     metricsText += '# TYPE security_vulnerabilities_count gauge\n';
     
-    // Add metrics with labels
-    metricsText += `security_vulnerabilities_count{severity="high",target_url="${this.targetUrl}"} ${numericCounts.high} ${timestamp}000\n`;
-    metricsText += `security_vulnerabilities_count{severity="medium",target_url="${this.targetUrl}"} ${numericCounts.medium} ${timestamp}000\n`;
-    metricsText += `security_vulnerabilities_count{severity="low",target_url="${this.targetUrl}"} ${numericCounts.low} ${timestamp}000\n`;
-    metricsText += `security_vulnerabilities_count{severity="informational",target_url="${this.targetUrl}"} ${numericCounts.informational} ${timestamp}000\n`;
-    metricsText += `security_vulnerabilities_count{severity="total",target_url="${this.targetUrl}"} ${numericCounts.total} ${timestamp}000\n`;
+    // Add metrics with labels but WITHOUT timestamps
+    metricsText += `security_vulnerabilities_count{severity="high",target_url="${this.targetUrl}"} ${numericCounts.high}\n`;
+    metricsText += `security_vulnerabilities_count{severity="medium",target_url="${this.targetUrl}"} ${numericCounts.medium}\n`;
+    metricsText += `security_vulnerabilities_count{severity="low",target_url="${this.targetUrl}"} ${numericCounts.low}\n`;
+    metricsText += `security_vulnerabilities_count{severity="informational",target_url="${this.targetUrl}"} ${numericCounts.informational}\n`;
+    metricsText += `security_vulnerabilities_count{severity="total",target_url="${this.targetUrl}"} ${numericCounts.total}\n`;
     
     console.log('Sending alternative metrics format to Prometheus:');
     console.log(metricsText);
@@ -299,6 +298,7 @@ export class ZapReporter {
     }
     
     console.log('Alternative metrics successfully sent to Prometheus');
+    return true;
   }
 
   /**
