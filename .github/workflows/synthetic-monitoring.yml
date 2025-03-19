@@ -101,8 +101,10 @@ jobs:
           node-version: '20'
           
       - name: Install dependencies
-        # Using npm install instead of npm ci to handle missing package-lock.json entries
         run: npm install
+        
+      - name: Compile TypeScript
+        run: npx tsc
         
       - name: Process ZAP Reports and Send to Prometheus
         env:
@@ -111,6 +113,5 @@ jobs:
           AWS_REGION: ${{ env.AWS_REGION }}
           S3_BUCKET: ${{ env.S3_BUCKET }}
           PROMETHEUS_PUSHGATEWAY: ${{ env.PROMETHEUS_PUSHGATEWAY }}
-          NODE_OPTIONS: "--loader ts-node/esm"
-        # Use the correct approach for TypeScript files in ESM mode
-        run: node --loader ts-node/esm scripts/process-zap-reports.ts
+        # Use the compiled JavaScript file instead of the TypeScript file
+        run: node dist/scripts/process-zap-reports.js
