@@ -111,5 +111,6 @@ jobs:
           AWS_REGION: ${{ env.AWS_REGION }}
           S3_BUCKET: ${{ env.S3_BUCKET }}
           PROMETHEUS_PUSHGATEWAY: ${{ env.PROMETHEUS_PUSHGATEWAY }}
-        # Use npx ts-node to run the TypeScript file directly
-        run: npx ts-node scripts/process-zap-reports.ts
+          NODE_OPTIONS: "--loader ts-node/esm"
+        # Use the correct approach for TypeScript files in ESM mode
+        run: node --loader ts-node/esm scripts/process-zap-reports.ts
