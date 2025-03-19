@@ -111,5 +111,5 @@ jobs:
           AWS_REGION: ${{ env.AWS_REGION }}
           S3_BUCKET: ${{ env.S3_BUCKET }}
           PROMETHEUS_PUSHGATEWAY: ${{ env.PROMETHEUS_PUSHGATEWAY }}
-        # Use the JavaScript wrapper instead of directly calling the TypeScript file
-        run: node scripts/process-zap-reports.js
+        # Use npx ts-node to run the TypeScript file directly
+        run: npx ts-node scripts/process-zap-reports.ts
