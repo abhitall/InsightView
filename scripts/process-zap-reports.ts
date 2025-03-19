@@ -1,11 +1,20 @@
+#!/usr/bin/env node
+
+/**
+ * TypeScript implementation of the ZAP report processor
+ * This script processes ZAP security scan reports and sends metrics to Prometheus
+ */
+
 import { ZapReporter } from '../src/exporters/zapReporter';
+import { VulnerabilityCounts } from '../src/types';
 
 /**
  * This script processes ZAP reports after a scan is complete:
  * 1. Parses the JSON report to count vulnerabilities by severity
  * 2. Uploads the HTML report to S3
+ * 3. Sends vulnerability metrics to Prometheus
  */
-async function main() {
+async function main(): Promise<void> {
   try {
     console.log('Processing ZAP security scan reports...');
     
