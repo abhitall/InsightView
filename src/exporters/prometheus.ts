@@ -1,5 +1,5 @@
 import { Registry, Gauge } from 'prom-client';
-import type { MonitoringReport } from '../types';
+import type { MonitoringReport } from '../types/index.js';
 
 export class PrometheusExporter {
   private registry: Registry;

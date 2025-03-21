@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { Registry, Gauge } from 'prom-client';
-import { VulnerabilityCounts, ZapAlert, ZapReportData } from '../types';
+import { VulnerabilityCounts, ZapAlert, ZapReportData } from '../types/index.js';
 
 export class ZapReporter {
   private client: S3Client;

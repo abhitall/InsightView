@@ -1,6 +1,6 @@
 import { type Metric } from 'web-vitals';
 import type { Page } from '@playwright/test';
-import type { WebVitalsData } from '../types';
+import type { WebVitalsData } from '../types/index.js';
 
 const WEB_VITALS_TIMEOUT = 10000; // 10 seconds timeout
 

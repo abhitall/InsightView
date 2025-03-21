@@ -1,5 +1,5 @@
 import type { Page, TestInfo } from '@playwright/test';
-import type { TestMetrics, ResourceMetrics, NavigationMetrics } from '../types';
+import type { TestMetrics, ResourceMetrics, NavigationMetrics } from '../types/index.js';
 import fs from 'fs';
 
 async function collectResourceMetrics(page: Page): Promise<ResourceMetrics> {

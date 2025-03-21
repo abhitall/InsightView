@@ -3,6 +3,10 @@ name: Synthetic Monitoring
 on:
   schedule:
     - cron: '*/30 * * * *'  # Runs every 30 minutes
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
   workflow_dispatch:  # Allows manual triggering
     inputs:
       test_url:
@@ -22,6 +26,11 @@ on:
         required: false
         type: string
         default: '{}'
+      force_security_scan:
+        description: 'Force security scan to run'
+        required: false
+        type: boolean
+        default: false
 
 env:
   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -30,6 +39,8 @@ env:
   S3_BUCKET: ${{ secrets.S3_BUCKET }}
   PROMETHEUS_PUSHGATEWAY: ${{ secrets.PROMETHEUS_PUSHGATEWAY }}
   TEST_URL: ${{ inputs.test_url || secrets.TEST_URL }}
+  GITHUB_EVENT_NAME: ${{ github.event_name }}
+  FORCE_SECURITY_SCAN: ${{ inputs.force_security_scan == true && 'true' || 'false' }}
 
 jobs:
   synthetic-tests:
@@ -44,6 +55,12 @@ jobs:
     
     steps:
       - uses: actions/checkout@v4
+      
+      # Install Docker for running ZAP container
+      # Only needed for PR and push events or when security scan is forced
+      - name: Install Docker
+        if: github.event_name == 'pull_request' || github.event_name == 'push' || inputs.force_security_scan
+        uses: docker/setup-buildx-action@v3
 
       - name: Run Synthetic Monitoring
         id: synthetic
@@ -63,55 +80,14 @@ jobs:
         if: steps.synthetic.outcome != 'success'
         run: echo "::warning::Synthetic monitoring tests failed, but workflow will continue"
 
-  zap-scan:
-    # Runs independently from synthetic-tests
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
-    
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: ZAP Scan
-        uses: zaproxy/action-baseline@v0.11.0
-        continue-on-error: true
-        with:
-          target: ${{ env.TEST_URL }}
-          rules_file_name: '.zap/rules-config.tsv'
-          cmd_options: '-a'
-          allow_issue_writing: true
-          fail_action: false  # Don't fail the workflow on alerts
-
+      # Upload ZAP Reports as artifacts if they exist
       - name: Upload ZAP Report as Artifact
-        if: always()
+        if: (github.event_name == 'pull_request' || github.event_name == 'push' || inputs.force_security_scan) && always()
         uses: actions/upload-artifact@v4
         with:
           name: zap-scan-report
           path: |
             report_html.html
-            report_md.md
             report_json.json
           retention-days: 30
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          
-      - name: Install dependencies
-        run: npm install
-        
-      - name: Compile TypeScript
-        run: npx tsc
-        
-      - name: Process ZAP Reports and Send to Prometheus
-        env:
-          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ env.AWS_REGION }}
-          S3_BUCKET: ${{ env.S3_BUCKET }}
-          PROMETHEUS_PUSHGATEWAY: ${{ env.PROMETHEUS_PUSHGATEWAY }}
-        # Use the compiled JavaScript file instead of the TypeScript file
-        run: node dist/scripts/process-zap-reports.js
+          if-no-files-found: ignore

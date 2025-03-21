@@ -1,6 +1,6 @@
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import archiver from 'archiver';
-import type { MonitoringReport } from '../types';
+import type { MonitoringReport } from '../types/index.js';
 import type { TestInfo } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
