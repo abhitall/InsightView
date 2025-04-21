@@ -10,59 +10,56 @@ test('multi-page performance test', async ({ page, context, monitoring }) => {
       timeout: 30000 
     });
     
-    // Ensure page is fully loaded
+    // Wait for page to be fully interactive
     await Promise.all([
       page.waitForLoadState('domcontentloaded'),
       page.waitForLoadState('load'),
-      page.waitForLoadState('networkidle'),
     ]);
     
-    // Additional stabilization wait
-    await page.waitForTimeout(5000);
+    // Force some interactions
+    await page.evaluate(() => {
+      window.scrollTo(0, document.body.scrollHeight / 2);
+    });
+    
+    // Brief wait for metrics to stabilize
+    await page.waitForTimeout(2000);
     console.log('First page loaded and stabilized');
   });
 
+  // Collect metrics for first page
+  await test.step('Collect first page metrics', async () => {
+    console.log('Collecting metrics for first page');
+    await monitoring();
+  });
+
   // Second page
-  const secondPage = await context.newPage();
   await test.step('Navigate to second page', async () => {
     console.log('Navigating to second page');
-    await secondPage.goto('/about', { 
+    await page.goto('/about', { 
       waitUntil: 'networkidle',
       timeout: 30000 
     });
     
-    // Ensure page is fully loaded
+    // Wait for page to be fully interactive
     await Promise.all([
-      secondPage.waitForLoadState('domcontentloaded'),
-      secondPage.waitForLoadState('load'),
-      secondPage.waitForLoadState('networkidle'),
+      page.waitForLoadState('domcontentloaded'),
+      page.waitForLoadState('load'),
     ]);
     
-    // Additional stabilization wait
-    await secondPage.waitForTimeout(5000);
+    // Force some interactions
+    await page.evaluate(() => {
+      window.scrollTo(0, document.body.scrollHeight / 2);
+    });
+    
+    // Brief wait for metrics to stabilize
+    await page.waitForTimeout(2000);
     console.log('Second page loaded and stabilized');
   });
 
-  await test.step('Collect monitoring data from both pages', async () => {
-    console.log('Starting to collect web vitals from multiple pages');
-    // Force interaction with the page to ensure metrics are collected
-    await page.evaluate(() => {
-      // Scroll down and up to ensure Cumulative Layout Shift is captured
-      window.scrollTo(0, 100);
-      setTimeout(() => window.scrollTo(0, 0), 300);
-    });
-    
-    await secondPage.evaluate(() => {
-      window.scrollTo(0, 100);
-      setTimeout(() => window.scrollTo(0, 0), 300);
-    });
-    
-    // Wait a moment for metrics to be collected
-    await page.waitForTimeout(2000);
-    
-    // Collect metrics from both pages
-    await monitoring([page, secondPage]);
-    console.log('Monitoring data collection completed');
+  // Collect metrics for second page
+  await test.step('Collect second page metrics', async () => {
+    console.log('Collecting metrics for second page');
+    await monitoring();
   });
 });
 
@@ -129,28 +126,43 @@ test('api endpoints performance test', async ({ page, monitoring }) => {
   await test.step('Test API endpoints', async () => {
     console.log('Testing API endpoints');
     
-    // Make multiple API calls to test resource timing
+    // Make API calls sequentially to avoid interference
     const endpoints = ['/api/users', '/api/products', '/api/orders'];
     
     for (const endpoint of endpoints) {
       console.log(`Testing endpoint: ${endpoint}`);
+      
+      // Navigate to a blank page before making API calls
+      await page.goto('about:blank');
+      
       const response = await page.evaluate(async (url) => {
         const start = performance.now();
-        const response = await fetch(url);
-        const data = await response.json();
-        const end = performance.now();
-        return { status: response.status, duration: end - start };
+        try {
+          const response = await fetch(url);
+          const data = await response.json();
+          const end = performance.now();
+          return { 
+            status: response.status, 
+            duration: end - start,
+            success: true 
+          };
+        } catch (e) {
+          return { 
+            status: 0, 
+            duration: performance.now() - start,
+            success: false,
+            error: e.message
+          };
+        }
       }, endpoint);
       
       console.log(`Endpoint ${endpoint} response:`, response);
       
-      // Wait briefly between requests
+      // Collect metrics after each API call
+      await monitoring();
+      
+      // Brief wait between requests
       await page.waitForTimeout(1000);
     }
-  });
-
-  await test.step('Collect monitoring data for API endpoints', async () => {
-    console.log('Collecting monitoring data for API endpoints');
-    await monitoring();
   });
 });

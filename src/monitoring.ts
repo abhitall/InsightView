@@ -1,5 +1,5 @@
 import { test as base } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { Page, TestType } from '@playwright/test';
 import { collectWebVitals } from './collectors/webVitals';
 import { collectTestMetrics } from './collectors/testMetrics';
 import { PrometheusExporter } from './exporters/prometheus';
@@ -9,7 +9,13 @@ import type { MonitoringReport } from './types';
 const prometheusExporter = new PrometheusExporter();
 const s3Exporter = new S3Exporter();
 
-export const test = base.extend({
+type MonitoringFixture = (pages?: Page[] | void) => Promise<void>;
+
+interface TestFixtures {
+  monitoring: MonitoringFixture;
+}
+
+export const test = base.extend<TestFixtures>({
   monitoring: async ({ page, browserName }, use, testInfo) => {
     const startTime = Date.now();
     
