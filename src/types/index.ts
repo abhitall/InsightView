@@ -1,10 +1,40 @@
 import type { Metric } from 'web-vitals';
 import type { TestInfo } from '@playwright/test';
 
-export type WebVitalMetricName = 'CLS' | 'FCP' | 'FID' | 'INP' | 'LCP' | 'TTFB';
+export type WebVitalMetricName = 
+  | 'CLS' 
+  | 'FCP' 
+  | 'FID' 
+  | 'INP' 
+  | 'LCP' 
+  | 'TTFB'
+  | 'RESOURCE_TIMING'
+  | 'NAVIGATION_TIMING';
+
+export type MetricRating = 'good' | 'needs-improvement' | 'poor' | 'neutral';
+
+export interface ResourceEntry {
+  name: string;
+  entryType: string;
+  startTime: number;
+  duration: number;
+  requestStart?: number;
+  responseEnd?: number;
+}
+
+// Base metric interface without entries
+interface BaseMetric extends Omit<Metric, 'name' | 'rating' | 'entries'> {
+  name: WebVitalMetricName;
+  rating: MetricRating;
+}
+
+// Extended metric interface with optional custom entries
+export interface ExtendedMetric extends BaseMetric {
+  entries?: ResourceEntry[];
+}
 
 export interface WebVitalsData {
-  metrics: Metric[];
+  metrics: ExtendedMetric[];
   timestamp: number;
   url: string;
 }
@@ -43,6 +73,7 @@ export interface TestMetrics {
   resourceStats: ResourceMetrics;
   navigationStats: NavigationMetrics;
   assertions: AssertionMetrics;
+  currentUrl?: string;  // Added to support URL context in metrics
 }
 
 export interface BrowserInfo {
@@ -57,7 +88,7 @@ export interface ViewportInfo {
 }
 
 export interface MonitoringReport {
-  webVitals: WebVitalsData | WebVitalsData[];  // Updated to support single or multiple pages
+  webVitals: WebVitalsData | WebVitalsData[];  // Supports single or multiple pages
   testMetrics: TestMetrics;
   timestamp: number;
   environment: {

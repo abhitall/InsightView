@@ -5,6 +5,7 @@ export class PrometheusExporter {
   private registry: Registry;
   private webVitalsGauge: Gauge;
   private testMetricsGauge: Gauge;
+  private resourceMetricsGauge: Gauge;
 
   constructor() {
     this.registry = new Registry();
@@ -12,14 +13,21 @@ export class PrometheusExporter {
     this.webVitalsGauge = new Gauge({
       name: 'synthetic_monitoring_web_vitals',
       help: 'Web Vitals metrics from synthetic monitoring',
-      labelNames: ['metric', 'url', 'test_name', 'browser', 'device'],
+      labelNames: ['metric', 'url', 'test_name', 'browser', 'device', 'page_type'],
+      registers: [this.registry],
+    });
+
+    this.resourceMetricsGauge = new Gauge({
+      name: 'synthetic_monitoring_resource_metrics',
+      help: 'Resource timing metrics from synthetic monitoring',
+      labelNames: ['metric', 'url', 'resource_type', 'test_name', 'browser', 'device', 'page_url'],
       registers: [this.registry],
     });
 
     this.testMetricsGauge = new Gauge({
       name: 'synthetic_monitoring_test_metrics',
       help: 'Test execution metrics from synthetic monitoring',
-      labelNames: ['category', 'metric', 'test_name', 'browser', 'device', 'status'],
+      labelNames: ['category', 'metric', 'test_name', 'browser', 'device', 'status', 'url'],
       registers: [this.registry],
     });
   }
@@ -42,6 +50,9 @@ export class PrometheusExporter {
       // Export Web Vitals metrics for each page
       webVitalsArray.forEach((pageWebVitals) => {
         if (pageWebVitals && Array.isArray(pageWebVitals.metrics)) {
+          // Determine page type from URL
+          const pageType = this.getPageType(pageWebVitals.url);
+          
           pageWebVitals.metrics.forEach((metric) => {
             if (metric && typeof metric.value === 'number') {
               console.log(`Setting web vital: ${metric.name}=${metric.value} for URL ${pageWebVitals.url}`);
@@ -50,9 +61,56 @@ export class PrometheusExporter {
                   ...labels,
                   metric: metric.name,
                   url: pageWebVitals.url,
+                  page_type: pageType,
                 },
                 metric.value
               );
+
+              // If metric has resource timing data, export it separately
+              if (metric.entries) {
+                metric.entries.forEach((entry: any) => {
+                  if (entry.name && entry.duration) {
+                    console.log(`Setting resource metric: ${entry.name}=${entry.duration}`);
+                    this.resourceMetricsGauge.set(
+                      {
+                        ...labels,
+                        metric: 'duration',
+                        url: entry.name,
+                        resource_type: entry.entryType || 'unknown',
+                        page_url: pageWebVitals.url,
+                      },
+                      entry.duration
+                    );
+
+                    // Export additional resource timing metrics if available
+                    if (entry.startTime) {
+                      this.resourceMetricsGauge.set(
+                        {
+                          ...labels,
+                          metric: 'start_time',
+                          url: entry.name,
+                          resource_type: entry.entryType || 'unknown',
+                          page_url: pageWebVitals.url,
+                        },
+                        entry.startTime
+                      );
+                    }
+
+                    if (entry.responseEnd && entry.requestStart) {
+                      this.resourceMetricsGauge.set(
+                        {
+                          ...labels,
+                          metric: 'ttfb',
+                          url: entry.name,
+                          resource_type: entry.entryType || 'unknown',
+                          page_url: pageWebVitals.url,
+                        },
+                        entry.responseEnd - entry.requestStart
+                      );
+                    }
+                  }
+                });
+              }
             }
           });
         } else {
@@ -60,7 +118,7 @@ export class PrometheusExporter {
         }
       });
 
-      // Export test metrics
+      // Export test metrics with URL context
       Object.entries(testMetrics).forEach(([category, metrics]) => {
         if (typeof metrics === 'object' && metrics !== null) {
           Object.entries(metrics).forEach(([metric, value]) => {
@@ -72,6 +130,7 @@ export class PrometheusExporter {
                   category,
                   metric,
                   status: testMetrics.status,
+                  url: testMetrics.currentUrl || 'unknown',
                 },
                 value
               );
@@ -84,6 +143,19 @@ export class PrometheusExporter {
     } catch (error) {
       console.error('Error exporting metrics to Prometheus:', error);
       throw error;
+    }
+  }
+
+  private getPageType(url: string): string {
+    try {
+      const parsedUrl = new URL(url);
+      const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+      
+      if (pathParts.length === 0) return 'homepage';
+      if (pathParts.length === 1) return pathParts[0];
+      return pathParts.join('_');
+    } catch (e) {
+      return 'unknown';
     }
   }
 
