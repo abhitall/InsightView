@@ -15,20 +15,50 @@ interface TestFixtures {
   monitoring: MonitoringFixture;
 }
 
+// Store metrics per test
+const testMetricsMap = new Map<string, Array<{
+  webVitals: any;
+  timestamp: number;
+  pageUrl: string;
+}>>();
+
 export const test = base.extend<TestFixtures>({
   monitoring: async ({ page, browserName }, use, testInfo) => {
     const startTime = Date.now();
+    const testId = testInfo.testId;
+    
+    // Initialize metrics array for this test if not exists
+    if (!testMetricsMap.has(testId)) {
+      testMetricsMap.set(testId, []);
+    }
     
     await use(async (pages?: Page[] | void) => {
-      // If pages array is provided, collect Web Vitals from all pages
-      const webVitals = pages 
-        ? await Promise.all(pages.map(p => collectWebVitals(p)))
-        : await collectWebVitals(page);
-
+      // Collect Web Vitals from the specified pages or current page
+      const targetPages = pages ? pages : [page];
+      
+      for (const targetPage of targetPages) {
+        const timestamp = Date.now();
+        const webVitals = await collectWebVitals(targetPage);
+        
+        // Store metrics with timestamp and page URL
+        testMetricsMap.get(testId)?.push({
+          webVitals,
+          timestamp,
+          pageUrl: targetPage.url()
+        });
+      }
+      
+      // After collecting all metrics for this test step
+      const allMetrics = testMetricsMap.get(testId) || [];
       const testMetrics = await collectTestMetrics(page, testInfo, startTime);
       
       const report: MonitoringReport = {
-        webVitals,
+        webVitals: allMetrics.map(m => ({
+          ...m.webVitals,
+          timestamp: m.timestamp,
+          testId,
+          testTitle: testInfo.title
+        })),
         testMetrics,
         timestamp: Date.now(),
         environment: {
@@ -47,5 +77,8 @@ export const test = base.extend<TestFixtures>({
         s3Exporter.export(report, testInfo),
       ]);
     });
+    
+    // Clean up metrics after test completion
+    testMetricsMap.delete(testId);
   },
 });
