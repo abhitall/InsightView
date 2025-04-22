@@ -13,11 +13,13 @@ interface CustomPerformanceMetric extends Omit<Metric, 'name' | 'entries'> {
 
 type CombinedMetric = Metric | CustomPerformanceMetric;
 
-const WEB_VITALS_TIMEOUT = 30000; // Increase timeout to 30 seconds
-const METRIC_COLLECTION_TIMEOUT = 25000; // Individual metric collection timeout
+const WEB_VITALS_TIMEOUT = 15000; // Reduce timeout to 15 seconds
+const METRIC_COLLECTION_TIMEOUT = 12000; // Individual metric collection timeout
 
-const CORE_WEB_VITALS = ['CLS', 'FCP', 'FID', 'INP', 'LCP', 'TTFB'] as const;
-type CoreWebVital = typeof CORE_WEB_VITALS[number];
+// Separate core web vitals into required and optional
+const REQUIRED_VITALS = ['FCP', 'LCP', 'TTFB'] as const;
+const OPTIONAL_VITALS = ['CLS', 'FID', 'INP'] as const;
+const ALL_VITALS = [...REQUIRED_VITALS, ...OPTIONAL_VITALS] as const;
 
 export async function collectWebVitals(page: Page): Promise<WebVitalsData> {
   try {
@@ -30,7 +32,11 @@ export async function collectWebVitals(page: Page): Promise<WebVitalsData> {
     });
     
     const metrics = await page.evaluate(
-      ({ timeout, coreWebVitals }: { timeout: number; coreWebVitals: readonly string[] }) => {
+      ({ timeout, requiredVitals, allVitals }: { 
+        timeout: number; 
+        requiredVitals: readonly string[];
+        allVitals: readonly string[];
+      }) => {
         return new Promise<CombinedMetric[]>((resolve) => {
           const metrics: CombinedMetric[] = [];
           const resolvedMetrics = new Set<string>();
@@ -83,14 +89,24 @@ export async function collectWebVitals(page: Page): Promise<WebVitalsData> {
           };
 
           const checkComplete = () => {
-            // Check if we have all core web vitals
-            const hasAllCoreMetrics = coreWebVitals.every(metric => 
+            // Check if we have all required web vitals
+            const hasRequiredMetrics = requiredVitals.every(metric => 
               metrics.some(m => m.name === metric)
             );
             
-            if (hasAllCoreMetrics) {
-              console.log('All core web vitals collected');
+            if (hasRequiredMetrics) {
+              console.log('All required web vitals collected');
               collectResourceTiming();
+              
+              // Log which optional metrics we got
+              const collectedOptional = allVitals.filter(metric => 
+                !requiredVitals.includes(metric) && 
+                metrics.some(m => m.name === metric)
+              );
+              if (collectedOptional.length > 0) {
+                console.log('Collected optional metrics:', collectedOptional.join(', '));
+              }
+              
               if (timeoutId) {
                 clearTimeout(timeoutId);
               }
@@ -99,10 +115,10 @@ export async function collectWebVitals(page: Page): Promise<WebVitalsData> {
               return true;
             }
             
-            // If we have some metrics but not all, wait for more
+            // If we have some metrics but not all required ones, wait for more
             if (metrics.length > 0) {
-              console.log(`Have ${metrics.length} metrics, waiting for more...`);
-              console.log('Missing metrics:', coreWebVitals.filter(metric => 
+              console.log(`Have ${metrics.length} metrics, waiting for required metrics...`);
+              console.log('Missing required metrics:', requiredVitals.filter(metric => 
                 !metrics.some(m => m.name === metric)
               ));
             }
@@ -124,7 +140,7 @@ export async function collectWebVitals(page: Page): Promise<WebVitalsData> {
             collectResourceTiming();
             console.log(`Resolving with ${metrics.length} metrics due to timeout`);
             console.log('Collected metrics:', metrics.map(m => m.name).join(', '));
-            console.log('Missing metrics:', coreWebVitals.filter(metric => 
+            console.log('Missing required metrics:', requiredVitals.filter(metric => 
               !metrics.some(m => m.name === metric)
             ));
             resolve(metrics);
@@ -150,7 +166,11 @@ export async function collectWebVitals(page: Page): Promise<WebVitalsData> {
           }
         });
       },
-      { timeout: METRIC_COLLECTION_TIMEOUT, coreWebVitals: CORE_WEB_VITALS }
+      { 
+        timeout: METRIC_COLLECTION_TIMEOUT, 
+        requiredVitals: REQUIRED_VITALS,
+        allVitals: ALL_VITALS
+      }
     );
     
     console.log(`Collected ${metrics.length} total metrics for ${page.url()}`);
