@@ -13,7 +13,7 @@ interface CustomPerformanceMetric extends Omit<Metric, 'name' | 'entries'> {
 
 type CombinedMetric = Metric | CustomPerformanceMetric;
 
-const WEB_VITALS_TIMEOUT = 15000; // Reduce timeout to 15 seconds
+const WEB_VITALS_TIMEOUT = 15000; // 15 seconds timeout
 const METRIC_COLLECTION_TIMEOUT = 12000; // Individual metric collection timeout
 
 // Separate core web vitals into required and optional
@@ -21,15 +21,38 @@ const REQUIRED_VITALS = ['FCP', 'LCP', 'TTFB'] as const;
 const OPTIONAL_VITALS = ['CLS', 'FID', 'INP'] as const;
 const ALL_VITALS = [...REQUIRED_VITALS, ...OPTIONAL_VITALS] as const;
 
+// Pages where we should skip web vitals collection
+const SKIP_VITALS_PAGES = ['about:blank', 'about:srcdoc'];
+
 export async function collectWebVitals(page: Page): Promise<WebVitalsData> {
+  const url = page.url();
+  
+  // Skip web vitals collection for special pages
+  if (SKIP_VITALS_PAGES.includes(url)) {
+    console.log(`Skipping web vitals collection for special page: ${url}`);
+    return {
+      metrics: [],
+      timestamp: Date.now(),
+      url: url,
+    };
+  }
+
   try {
-    console.log(`Collecting Web Vitals for page: ${page.url()}`);
+    console.log(`Collecting Web Vitals for page: ${url}`);
     
-    // Inject web-vitals library early
-    await page.addScriptTag({
-      url: 'https://unpkg.com/web-vitals@3/dist/web-vitals.iife.js',
-      type: 'text/javascript'
-    });
+    // Check if page is still valid before proceeding
+    if (!page.isClosed()) {
+      // Inject web-vitals library early
+      await page.addScriptTag({
+        url: 'https://unpkg.com/web-vitals@3/dist/web-vitals.iife.js',
+        type: 'text/javascript'
+      }).catch(e => {
+        console.error('Failed to inject web-vitals library:', e);
+        throw e;
+      });
+    } else {
+      throw new Error('Page is closed');
+    }
     
     const metrics = await page.evaluate(
       ({ timeout, requiredVitals, allVitals }: { 
@@ -94,17 +117,23 @@ export async function collectWebVitals(page: Page): Promise<WebVitalsData> {
               metrics.some(m => m.name === metric)
             );
             
-            if (hasRequiredMetrics) {
-              console.log('All required web vitals collected');
+            // Also resolve if we have at least one metric and some time has passed
+            const shouldResolveEarly = metrics.length > 0 && 
+              performance.now() > timeout / 2;
+            
+            if (hasRequiredMetrics || shouldResolveEarly) {
+              console.log(hasRequiredMetrics ? 
+                'All required web vitals collected' : 
+                'Resolving early with partial metrics');
+              
               collectResourceTiming();
               
-              // Log which optional metrics we got
-              const collectedOptional = allVitals.filter(metric => 
-                !requiredVitals.includes(metric) && 
+              // Log which metrics we got
+              const collectedMetrics = allVitals.filter(metric => 
                 metrics.some(m => m.name === metric)
               );
-              if (collectedOptional.length > 0) {
-                console.log('Collected optional metrics:', collectedOptional.join(', '));
+              if (collectedMetrics.length > 0) {
+                console.log('Collected metrics:', collectedMetrics.join(', '));
               }
               
               if (timeoutId) {
@@ -115,9 +144,9 @@ export async function collectWebVitals(page: Page): Promise<WebVitalsData> {
               return true;
             }
             
-            // If we have some metrics but not all required ones, wait for more
+            // If we have some metrics but not all required ones, log progress
             if (metrics.length > 0) {
-              console.log(`Have ${metrics.length} metrics, waiting for required metrics...`);
+              console.log(`Have ${metrics.length} metrics so far`);
               console.log('Missing required metrics:', requiredVitals.filter(metric => 
                 !metrics.some(m => m.name === metric)
               ));
@@ -139,7 +168,9 @@ export async function collectWebVitals(page: Page): Promise<WebVitalsData> {
             console.log('Web vitals collection timed out, collecting final metrics');
             collectResourceTiming();
             console.log(`Resolving with ${metrics.length} metrics due to timeout`);
-            console.log('Collected metrics:', metrics.map(m => m.name).join(', '));
+            if (metrics.length > 0) {
+              console.log('Collected metrics:', metrics.map(m => m.name).join(', '));
+            }
             console.log('Missing required metrics:', requiredVitals.filter(metric => 
               !metrics.some(m => m.name === metric)
             ));
@@ -162,6 +193,8 @@ export async function collectWebVitals(page: Page): Promise<WebVitalsData> {
             webVitals.onTTFB(onMetric);
           } catch (e) {
             console.error('Error setting up web vitals handlers:', e);
+            // Still try to collect resource timing data
+            collectResourceTiming();
             resolve(metrics);
           }
         });
@@ -173,20 +206,22 @@ export async function collectWebVitals(page: Page): Promise<WebVitalsData> {
       }
     );
     
-    console.log(`Collected ${metrics.length} total metrics for ${page.url()}`);
-    console.log('Metrics:', metrics.map(m => `${m.name}=${m.value}`).join(', '));
+    console.log(`Collected ${metrics.length} total metrics for ${url}`);
+    if (metrics.length > 0) {
+      console.log('Metrics:', metrics.map(m => `${m.name}=${m.value}`).join(', '));
+    }
     
     return {
       metrics,
       timestamp: Date.now(),
-      url: page.url(),
+      url: url,
     };
   } catch (error) {
-    console.error(`Error collecting web vitals for ${page.url()}:`, error);
+    console.error(`Error collecting web vitals for ${url}:`, error);
     return {
       metrics: [],
       timestamp: Date.now(),
-      url: page.url(),
+      url: url,
     };
   }
 }
