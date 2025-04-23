@@ -35,31 +35,39 @@ test('multi-page performance test', async ({ page, context, monitoring }) => {
   // Second page
   await test.step('Navigate to second page', async () => {
     console.log('Navigating to second page');
-    await page.goto('/about', { 
+    // Create a new page instance for the second page
+    const secondPage = await context.newPage();
+    
+    // Navigate to the second page
+    await secondPage.goto('/about', { 
       waitUntil: 'networkidle',
       timeout: 30000 
     });
     
     // Wait for page to be fully interactive
     await Promise.all([
-      page.waitForLoadState('domcontentloaded'),
-      page.waitForLoadState('load'),
+      secondPage.waitForLoadState('domcontentloaded'),
+      secondPage.waitForLoadState('load'),
     ]);
     
     // Force some interactions
-    await page.evaluate(() => {
+    await secondPage.evaluate(() => {
       window.scrollTo(0, document.body.scrollHeight / 2);
     });
     
     // Brief wait for metrics to stabilize
-    await page.waitForTimeout(2000);
+    await secondPage.waitForTimeout(2000);
     console.log('Second page loaded and stabilized');
-  });
 
-  // Collect metrics for second page
-  await test.step('Collect second page metrics', async () => {
-    console.log('Collecting metrics for second page');
-    await monitoring();
+    // Collect metrics for second page
+    await test.step('Collect second page metrics', async () => {
+      console.log('Collecting metrics for second page');
+      // Use the monitoring fixture with the second page
+      await monitoring();
+    });
+
+    // Close the second page
+    await secondPage.close();
   });
 });
 
@@ -98,31 +106,38 @@ test('homepage performance test', async ({ page, monitoring }) => {
   // Navigate to another page to test resource collection
   await test.step('Navigate to second page', async () => {
     console.log('Navigating to second page');
-    await page.click('a:first-child', { timeout: 10000 }); // Click first link, adjust selector as needed
+    // Create a new page instance for the second page
+    const secondPage = await page.context().newPage();
     
-    // Wait for navigation to start
-    await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {
-      console.warn('DOMContentLoaded not reached, continuing with current state');
+    // Navigate to the second page
+    await secondPage.goto('/about', { 
+      waitUntil: 'domcontentloaded',
+      timeout: 30000 
     });
     
-    // Wait for load state with a shorter timeout
-    await page.waitForLoadState('load', { timeout: 10000 }).catch(() => {
+    // Wait for page to be fully interactive
+    await secondPage.waitForLoadState('load', { timeout: 10000 }).catch(() => {
       console.warn('Load state not reached, continuing with current state');
     });
     
     // Additional wait for page stability
-    await page.waitForTimeout(5000);
+    await secondPage.waitForTimeout(5000);
     
     // Force some interactions
-    await page.evaluate(() => {
+    await secondPage.evaluate(() => {
       window.scrollTo(0, document.body.scrollHeight / 2);
       setTimeout(() => window.scrollTo(0, document.body.scrollHeight), 1000);
     });
-  });
 
-  await test.step('Collect monitoring data for second page', async () => {
-    console.log('Collecting monitoring data for second page');
-    await monitoring();
+    // Collect metrics for second page
+    await test.step('Collect monitoring data for second page', async () => {
+      console.log('Collecting monitoring data for second page');
+      // Use the monitoring fixture with the second page
+      await monitoring();
+    });
+
+    // Close the second page
+    await secondPage.close();
   });
 });
 
