@@ -1,12 +1,48 @@
 import type { Metric } from 'web-vitals';
 import type { TestInfo } from '@playwright/test';
 
-export type WebVitalMetricName = 'CLS' | 'FCP' | 'FID' | 'INP' | 'LCP' | 'TTFB';
+export type WebVitalMetricName = 
+  | 'CLS' 
+  | 'FCP' 
+  | 'FID' 
+  | 'INP' 
+  | 'LCP' 
+  | 'TTFB'
+  | 'RESOURCE_TIMING'
+  | 'NAVIGATION_TIMING';
+
+export type MetricRating = 'good' | 'needs-improvement' | 'poor' | 'neutral';
+
+export interface ResourceEntry {
+  name: string;
+  entryType: string;
+  startTime: number;
+  duration: number;
+  requestStart?: number;
+  responseEnd?: number;
+}
+
+// Base metric interface without entries
+interface BaseMetric extends Omit<Metric, 'name' | 'rating' | 'entries'> {
+  name: WebVitalMetricName;
+  rating: MetricRating;
+}
+
+// Extended metric interface with optional custom entries
+export interface ExtendedMetric extends BaseMetric {
+  entries?: ResourceEntry[];
+}
 
 export interface WebVitalsData {
-  metrics: Metric[];
-  timestamp: number;
-  url: string;
+  metrics: Array<Metric & {
+    labels: {
+      testId: TestInfo['testId'];
+      testTitle: string;
+      pageIndex: number;
+      timestamp: number;
+      url: string;
+    };
+  }>;
 }
 
 export interface TestStep {
@@ -34,15 +70,39 @@ export interface AssertionMetrics {
   failed: number;
 }
 
+export interface ApiMetrics {
+  endpoint: string;
+  method: string;
+  statusCode: number;
+  duration: number;
+  success: boolean;
+  error?: string;
+  responseSize?: number;
+  timestamp: number;
+  requestHeaders?: Record<string, string>;
+  responseHeaders?: Record<string, string>;
+  responseData?: any;
+  requestBody?: any;
+  retryCount?: number;
+  retryDelay?: number;
+}
+
 export interface TestMetrics {
   duration: number;
-  status: string;
+  status: 'passed' | 'failed' | 'skipped';
   name: string;
   retries: number;
   steps: TestStep[];
   resourceStats: ResourceMetrics;
   navigationStats: NavigationMetrics;
   assertions: AssertionMetrics;
+  apiMetrics?: ApiMetrics[];
+  labels: {
+    testId: TestInfo['testId'];
+    testTitle: string;
+    timestamp: number;
+    url: string;
+  };
 }
 
 export interface BrowserInfo {
@@ -57,12 +117,19 @@ export interface ViewportInfo {
 }
 
 export interface MonitoringReport {
-  webVitals: WebVitalsData | WebVitalsData[];  // Updated to support single or multiple pages
+  webVitals: WebVitalsData[];
   testMetrics: TestMetrics;
   timestamp: number;
   environment: {
     userAgent: string;
-    viewport: ViewportInfo;
-    browser: BrowserInfo;
+    viewport: {
+      width: number;
+      height: number;
+    };
+    browser: {
+      name: string;
+      version: string;
+      device: string;
+    };
   };
 }
