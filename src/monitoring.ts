@@ -24,6 +24,10 @@ export const test = base.extend<{
       try {
         console.log(`Collecting metrics for page: ${page.url()}`);
         
+        // Wait for page to be stable before collecting metrics
+        await page.waitForLoadState('networkidle');
+        await page.waitForTimeout(1000); // Additional wait for metrics to stabilize
+        
         // Collect web vitals
         const webVitals = await collectWebVitals(page);
         
@@ -44,22 +48,21 @@ export const test = base.extend<{
         collectedMetrics.webVitals.push(enrichedWebVitals);
         console.log(`Collected ${webVitals.metrics.length} web vitals metrics for page ${collectedMetrics.webVitals.length}`);
 
-        // Collect test metrics only once at the end
-        if (!collectedMetrics.testMetrics) {
-          const testMetrics = await collectTestMetrics(page, testInfo, startTime);
-          collectedMetrics.testMetrics = {
-            ...testMetrics,
-            labels: {
-              testId: testInfo.testId,
-              testTitle: testInfo.title,
-              timestamp: Date.now(),
-              url: page.url()
-            }
-          };
-          console.log('Collected test metrics');
-        }
+        // Collect test metrics for each page
+        const testMetrics = await collectTestMetrics(page, testInfo, startTime);
+        collectedMetrics.testMetrics = {
+          ...testMetrics,
+          labels: {
+            testId: testInfo.testId,
+            testTitle: testInfo.title,
+            timestamp: Date.now(),
+            url: page.url()
+          }
+        };
+        console.log('Collected test metrics for current page');
       } catch (error) {
         console.error('Error collecting metrics:', error);
+        // Don't throw here to allow the test to continue
       }
     };
 
@@ -73,32 +76,49 @@ export const test = base.extend<{
         console.log(`Total pages with web vitals: ${collectedMetrics.webVitals.length}`);
         console.log(`Test ID: ${testInfo.testId}`);
 
+        // Get environment information
+        const userAgent = await page.evaluate(() => navigator.userAgent);
+        const viewport = page.viewportSize() || { width: 0, height: 0 };
+        const browserVersion = await page.evaluate(() => {
+          const match = navigator.userAgent.match(/Chrome\/([0-9.]+)/);
+          return match ? match[1] : '';
+        });
+
         // Combine all metrics into a single report
         const report: MonitoringReport = {
           webVitals: collectedMetrics.webVitals,
           testMetrics: collectedMetrics.testMetrics!,
           timestamp: Date.now(),
           environment: {
-            userAgent: await page.evaluate(() => navigator.userAgent),
-            viewport: page.viewportSize() || { width: 0, height: 0 },
+            userAgent,
+            viewport,
             browser: {
               name: browserName,
-              version: await page.evaluate(() => navigator.userAgent.match(/Chrome\/([0-9.]+)/)?.[1] || ''),
+              version: browserVersion,
               device: testInfo.project.name,
             },
           },
         };
 
-        // Send to Prometheus
+        // Send to Prometheus with retry
         const prometheusExporter = new PrometheusExporter();
-        await prometheusExporter.export(report);
-        console.log('Metrics sent to Prometheus');
+        try {
+          await prometheusExporter.export(report);
+          console.log('Metrics sent to Prometheus');
+        } catch (error) {
+          console.error('Failed to send metrics to Prometheus:', error);
+          // Continue with S3 export even if Prometheus fails
+        }
 
         // Send to S3 if configured
         if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
-          const s3Exporter = new S3Exporter();
-          await s3Exporter.export(report, testInfo);
-          console.log('Metrics sent to S3');
+          try {
+            const s3Exporter = new S3Exporter();
+            await s3Exporter.export(report, testInfo);
+            console.log('Metrics sent to S3');
+          } catch (error) {
+            console.error('Failed to send metrics to S3:', error);
+          }
         }
       } catch (error) {
         console.error('Error sending collected metrics:', error);

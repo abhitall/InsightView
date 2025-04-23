@@ -70,6 +70,23 @@ export interface AssertionMetrics {
   failed: number;
 }
 
+export interface ApiMetrics {
+  endpoint: string;
+  method: string;
+  statusCode: number;
+  duration: number;
+  success: boolean;
+  error?: string;
+  responseSize?: number;
+  timestamp: number;
+  requestHeaders?: Record<string, string>;
+  responseHeaders?: Record<string, string>;
+  responseData?: any;
+  requestBody?: any;
+  retryCount?: number;
+  retryDelay?: number;
+}
+
 export interface TestMetrics {
   duration: number;
   status: 'passed' | 'failed' | 'skipped';
@@ -79,6 +96,7 @@ export interface TestMetrics {
   resourceStats: ResourceMetrics;
   navigationStats: NavigationMetrics;
   assertions: AssertionMetrics;
+  apiMetrics?: ApiMetrics[];
   labels: {
     testId: TestInfo['testId'];
     testTitle: string;

@@ -1,11 +1,14 @@
-import { Registry, Gauge } from 'prom-client';
+import { Registry, Gauge, Histogram } from 'prom-client';
 import type { MonitoringReport } from '../types';
 
 export class PrometheusExporter {
   private registry: Registry;
   private webVitalsGauge: Gauge;
   private testMetricsGauge: Gauge;
-  private resourceMetricsGauge: Gauge;
+  private testDurationHistogram: Histogram;
+  private resourceMetricsHistogram: Histogram;
+  private apiMetricsHistogram: Histogram;
+  private apiResponseSizeHistogram: Histogram;
   private actionRunId: string;
 
   constructor() {
@@ -31,13 +34,6 @@ export class PrometheusExporter {
       registers: [this.registry],
     });
 
-    this.resourceMetricsGauge = new Gauge({
-      name: 'synthetic_monitoring_resource_metrics',
-      help: 'Resource timing metrics from synthetic monitoring',
-      labelNames: ['metric', 'url', 'resource_type', 'test_name', 'browser', 'device', 'page_url'],
-      registers: [this.registry],
-    });
-
     this.testMetricsGauge = new Gauge({
       name: 'synthetic_monitoring_test_metrics',
       help: 'Test execution metrics from synthetic monitoring',
@@ -54,6 +50,80 @@ export class PrometheusExporter {
         'repository',
         'workflow'
       ],
+      registers: [this.registry],
+    });
+
+    this.testDurationHistogram = new Histogram({
+      name: 'synthetic_monitoring_test_duration',
+      help: 'Test execution duration distribution',
+      labelNames: [
+        'url',
+        'test_id',
+        'test_title',
+        'browser',
+        'device',
+        'status',
+        'action_run_id',
+        'repository',
+        'workflow'
+      ],
+      buckets: [100, 500, 1000, 2000, 5000, 10000, 30000],
+      registers: [this.registry],
+    });
+
+    this.resourceMetricsHistogram = new Histogram({
+      name: 'synthetic_monitoring_resource_metrics',
+      help: 'Resource timing metrics distribution',
+      labelNames: [
+        'metric',
+        'url',
+        'test_id',
+        'test_title',
+        'browser',
+        'device',
+        'action_run_id',
+        'repository',
+        'workflow'
+      ],
+      buckets: [10, 50, 100, 250, 500, 1000, 2500, 5000],
+      registers: [this.registry],
+    });
+
+    this.apiMetricsHistogram = new Histogram({
+      name: 'synthetic_monitoring_api_metrics',
+      help: 'API endpoint metrics distribution',
+      labelNames: [
+        'endpoint',
+        'method',
+        'status_code',
+        'test_id',
+        'test_title',
+        'browser',
+        'device',
+        'action_run_id',
+        'repository',
+        'workflow'
+      ],
+      buckets: [10, 50, 100, 250, 500, 1000, 2500, 5000],
+      registers: [this.registry],
+    });
+
+    this.apiResponseSizeHistogram = new Histogram({
+      name: 'synthetic_monitoring_api_response_size',
+      help: 'API response size distribution',
+      labelNames: [
+        'endpoint',
+        'method',
+        'status_code',
+        'test_id',
+        'test_title',
+        'browser',
+        'device',
+        'action_run_id',
+        'repository',
+        'workflow'
+      ],
+      buckets: [100, 1000, 10000, 100000, 1000000, 10000000],
       registers: [this.registry],
     });
   }
@@ -102,6 +172,12 @@ export class PrometheusExporter {
         status: testMetrics.status,
       };
 
+      // Record test duration in histogram
+      this.testDurationHistogram.observe(
+        { ...commonLabels },
+        testMetrics.duration
+      );
+
       // Export core test metrics
       this.testMetricsGauge.set(
         { ...commonLabels, metric: 'duration' },
@@ -125,6 +201,13 @@ export class PrometheusExporter {
 
       // Export resource metrics if available
       if (testMetrics.resourceStats) {
+        // Record resource metrics in histogram
+        this.resourceMetricsHistogram.observe(
+          { ...commonLabels, metric: 'load_time' },
+          testMetrics.resourceStats.loadTime
+        );
+
+        // Export as gauges for current values
         this.testMetricsGauge.set(
           { ...commonLabels, metric: 'total_requests' },
           testMetrics.resourceStats.totalRequests
@@ -136,10 +219,6 @@ export class PrometheusExporter {
         this.testMetricsGauge.set(
           { ...commonLabels, metric: 'total_bytes' },
           testMetrics.resourceStats.totalBytes
-        );
-        this.testMetricsGauge.set(
-          { ...commonLabels, metric: 'load_time' },
-          testMetrics.resourceStats.loadTime
         );
       }
 
@@ -175,6 +254,40 @@ export class PrometheusExporter {
         );
       }
 
+      // Export API metrics if available
+      if (testMetrics.apiMetrics) {
+        for (const apiMetric of testMetrics.apiMetrics) {
+          const apiLabels = {
+            ...baseLabels,
+            endpoint: apiMetric.endpoint,
+            method: apiMetric.method,
+            status_code: String(apiMetric.statusCode),
+            test_id: testMetrics.labels.testId,
+            test_title: sanitizedTitle,
+          };
+
+          // Record API duration
+          this.apiMetricsHistogram.observe(
+            apiLabels,
+            apiMetric.duration
+          );
+
+          // Record API response size if available
+          if (apiMetric.responseSize) {
+            this.apiResponseSizeHistogram.observe(
+              apiLabels,
+              apiMetric.responseSize
+            );
+          }
+
+          // Record API success/failure
+          this.testMetricsGauge.set(
+            { ...commonLabels, metric: 'api_success' },
+            apiMetric.success ? 1 : 0
+          );
+        }
+      }
+
       console.log('Setting test metrics with labels:', commonLabels);
 
       await this.pushMetrics();
@@ -203,28 +316,39 @@ export class PrometheusExporter {
       throw new Error('PROMETHEUS_PUSHGATEWAY environment variable not set');
     }
 
-    try {
-      const metrics = await this.registry.metrics();
-      console.log('Raw metrics being pushed to Prometheus:');
-      console.log(metrics);
-      
-      const response = await fetch(`${pushgatewayUrl}/metrics/job/synthetic_monitoring`, {
-        method: 'POST',
-        body: metrics,
-        headers: {
-          'Content-Type': 'text/plain',
-        },
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to push metrics to Pushgateway: ${response.status} ${response.statusText}\n${errorText}`);
+    const maxRetries = 3;
+    let retryCount = 0;
+
+    while (retryCount < maxRetries) {
+      try {
+        const metrics = await this.registry.metrics();
+        console.log('Raw metrics being pushed to Prometheus:');
+        console.log(metrics);
+        
+        const response = await fetch(`${pushgatewayUrl}/metrics/job/synthetic_monitoring`, {
+          method: 'POST',
+          body: metrics,
+          headers: {
+            'Content-Type': 'text/plain',
+          },
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Failed to push metrics to Pushgateway: ${response.status} ${response.statusText}\n${errorText}`);
+        }
+        
+        console.log('Successfully pushed metrics to Prometheus Pushgateway');
+        return;
+      } catch (error) {
+        retryCount++;
+        if (retryCount === maxRetries) {
+          console.error('Error pushing metrics to Prometheus Pushgateway after retries:', error);
+          throw error;
+        }
+        console.warn(`Retry ${retryCount} of ${maxRetries} after error:`, error);
+        await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
       }
-      
-      console.log('Successfully pushed metrics to Prometheus Pushgateway');
-    } catch (error) {
-      console.error('Error pushing metrics to Prometheus Pushgateway:', error);
-      throw error;
     }
   }
 }
