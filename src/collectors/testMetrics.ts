@@ -129,7 +129,15 @@ async function collectApiMetrics(page: Page): Promise<ApiMetrics[]> {
           requestHeaders: headers,
           responseHeaders: headersObj,
           responseData,
-          requestBody: postData ? JSON.parse(postData) : undefined,
+          requestBody: (() => {
+            if (!postData) return undefined;
+            try {
+              return JSON.parse(postData);
+            } catch (error) {
+              console.error('Failed to parse postData as JSON:', error);
+              return undefined;
+            }
+          })(),
           retryCount,
           retryDelay
         });
