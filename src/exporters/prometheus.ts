@@ -6,14 +6,28 @@ export class PrometheusExporter {
   private webVitalsGauge: Gauge;
   private testMetricsGauge: Gauge;
   private resourceMetricsGauge: Gauge;
+  private actionRunId: string;
 
   constructor() {
     this.registry = new Registry();
+    this.actionRunId = process.env.GITHUB_RUN_ID || `local_${Date.now()}`;
     
     this.webVitalsGauge = new Gauge({
       name: 'synthetic_monitoring_web_vitals',
       help: 'Web Vitals metrics from synthetic monitoring',
-      labelNames: ['metric', 'url', 'test_id', 'test_title', 'page_index', 'timestamp', 'browser', 'device'],
+      labelNames: [
+        'metric',
+        'url',
+        'test_id',
+        'test_title',
+        'page_index',
+        'timestamp',
+        'browser',
+        'device',
+        'action_run_id',
+        'repository',
+        'workflow'
+      ],
       registers: [this.registry],
     });
 
@@ -27,7 +41,19 @@ export class PrometheusExporter {
     this.testMetricsGauge = new Gauge({
       name: 'synthetic_monitoring_test_metrics',
       help: 'Test execution metrics from synthetic monitoring',
-      labelNames: ['metric', 'url', 'test_id', 'test_title', 'timestamp', 'browser', 'device', 'status'],
+      labelNames: [
+        'metric',
+        'url',
+        'test_id',
+        'test_title',
+        'timestamp',
+        'browser',
+        'device',
+        'status',
+        'action_run_id',
+        'repository',
+        'workflow'
+      ],
       registers: [this.registry],
     });
   }
@@ -37,6 +63,9 @@ export class PrometheusExporter {
     const baseLabels = {
       browser: environment.browser.name,
       device: environment.browser.device,
+      action_run_id: this.actionRunId,
+      repository: process.env.GITHUB_REPOSITORY || 'local',
+      workflow: process.env.GITHUB_WORKFLOW || 'local'
     };
 
     try {
