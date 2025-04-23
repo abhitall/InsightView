@@ -80,34 +80,88 @@ function sanitizeTestInfo(testInfo: TestInfo) {
 }
 
 async function collectApiMetrics(page: Page): Promise<ApiMetrics[]> {
-  return await page.evaluate(() => {
-    const requests = performance.getEntriesByType('resource')
-      .filter(entry => {
-        const url = (entry as PerformanceResourceTiming).name;
-        return url.startsWith('http') && !url.includes(window.location.host);
-      })
-      .map(entry => {
-        const resource = entry as PerformanceResourceTiming;
-        const request = (window as any).__apiRequests?.[resource.name] || {};
+  const apiRequests: ApiMetrics[] = [];
+  
+  // Set up request interception
+  await page.route('**/*', async (route, request) => {
+    const url = request.url();
+    const method = request.method();
+    const headers = request.headers();
+    const postData = request.postData();
+    
+    // Only track external API requests
+    if (!url.startsWith('http') || url.includes(page.url())) {
+      return route.continue();
+    }
+    
+    const startTime = Date.now();
+    let retryCount = 0;
+    let retryDelay = 0;
+    
+    while (true) {
+      try {
+        const response = await route.fetch();
+        const endTime = Date.now();
         
-        return {
-          endpoint: resource.name,
-          method: request.method || 'GET',
-          statusCode: resource.responseStatus || 0,
-          duration: resource.duration,
-          success: resource.duration > 0,
-          responseSize: resource.transferSize || resource.encodedBodySize,
-          timestamp: resource.startTime,
-          requestHeaders: request.headers,
-          responseHeaders: request.responseHeaders,
-          responseData: request.responseData,
-          requestBody: request.body,
-          retryCount: request.retryCount,
-          retryDelay: request.retryDelay
-        };
-      });
-    return requests;
+        // Get response data
+        const responseHeaders = response.headers();
+        const responseData = await response.json().catch(() => null);
+        
+        // Convert headers to plain object
+        const headersObj: Record<string, string> = {};
+        for (const [key, value] of Object.entries(responseHeaders)) {
+          headersObj[key] = value;
+        }
+        
+        // Get content length from headers
+        const contentLength = responseHeaders['content-length'];
+        const responseSize = contentLength ? parseInt(contentLength) : undefined;
+        
+        // Store API metrics
+        apiRequests.push({
+          endpoint: url,
+          method,
+          statusCode: response.status(),
+          duration: endTime - startTime,
+          success: response.ok(),
+          responseSize,
+          timestamp: startTime,
+          requestHeaders: headers,
+          responseHeaders: headersObj,
+          responseData,
+          requestBody: postData ? JSON.parse(postData) : undefined,
+          retryCount,
+          retryDelay
+        });
+        
+        return route.continue();
+      } catch (error: unknown) {
+        retryCount++;
+        if (retryCount >= 3) {
+          // Store failed request metrics
+          apiRequests.push({
+            endpoint: url,
+            method,
+            statusCode: 0,
+            duration: Date.now() - startTime,
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error',
+            timestamp: startTime,
+            requestHeaders: headers,
+            requestBody: postData ? JSON.parse(postData) : undefined,
+            retryCount,
+            retryDelay
+          });
+          return route.continue();
+        }
+        
+        retryDelay = Math.min(1000 * Math.pow(2, retryCount), 10000);
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+      }
+    }
   });
+  
+  return apiRequests;
 }
 
 export async function collectTestMetrics(page: Page, testInfo: TestInfo, startTime: number): Promise<TestMetrics> {
@@ -130,11 +184,17 @@ export async function collectTestMetrics(page: Page, testInfo: TestInfo, startTi
   // Collect resource and navigation metrics using helper functions
   let resourceStats: ResourceMetrics;
   let navigationStats: NavigationMetrics;
+  let apiMetrics: ApiMetrics[] | undefined;
 
   try {
-    [resourceStats, navigationStats] = await Promise.all([
+    // Start API metrics collection
+    const apiMetricsPromise = collectApiMetrics(page);
+    
+    // Collect other metrics in parallel
+    [resourceStats, navigationStats, apiMetrics] = await Promise.all([
       collectResourceMetrics(page),
-      collectNavigationMetrics(page)
+      collectNavigationMetrics(page),
+      apiMetricsPromise
     ]);
   } catch (error) {
     console.error('Error collecting performance metrics:', error);
@@ -149,58 +209,6 @@ export async function collectTestMetrics(page: Page, testInfo: TestInfo, startTi
       load: 0,
       firstPaint: 0
     };
-  }
-
-  // Collect API metrics if available
-  let apiMetrics: ApiMetrics[] | undefined;
-  try {
-    // Set up API request tracking
-    await page.evaluate(() => {
-      if (!(window as any).__apiRequests) {
-        (window as any).__apiRequests = {};
-        
-        // Intercept fetch requests
-        const originalFetch = window.fetch;
-        window.fetch = async function(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-          const startTime = performance.now();
-          let retryCount = 0;
-          let retryDelay = 0;
-          
-          while (true) {
-            try {
-              const response = await originalFetch(input, init);
-              const endTime = performance.now();
-              
-              // Store request details
-              const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-              (window as any).__apiRequests[url] = {
-                method: init?.method || 'GET',
-                headers: init?.headers,
-                body: init?.body,
-                retryCount,
-                retryDelay,
-                responseHeaders: Object.fromEntries(response.headers.entries()),
-                responseData: await response.clone().json().catch(() => null)
-              };
-              
-              return response;
-            } catch (error) {
-              retryCount++;
-              if (retryCount >= 3) throw error;
-              retryDelay = Math.min(1000 * Math.pow(2, retryCount), 10000);
-              await new Promise(resolve => setTimeout(resolve, retryDelay));
-            }
-          }
-        };
-      }
-    });
-
-    const apiRequests = await collectApiMetrics(page);
-    if (apiRequests.length > 0) {
-      apiMetrics = apiRequests;
-    }
-  } catch (error) {
-    console.error('Error collecting API metrics:', error);
   }
 
   // Collect assertion metrics
