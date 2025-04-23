@@ -1,4 +1,6 @@
-import { Registry, Gauge, Histogram } from 'prom-client';
+import { WebVitalsData, TestMetrics } from '../types';
+import { Registry, Gauge, Counter, Histogram } from 'prom-client';
+import fetch from 'node-fetch';
 import type { MonitoringReport } from '../types';
 
 export class PrometheusExporter {
@@ -10,11 +12,21 @@ export class PrometheusExporter {
   private apiMetricsHistogram: Histogram;
   private apiResponseSizeHistogram: Histogram;
   private actionRunId: string;
+  private repository: string;
+  private workflow: string;
+  private prometheusUrl: string;
+  private metricsBuffer: string[] = [];
+  private readonly maxBufferSize = 100;
+  private readonly flushInterval = 5000; // 5 seconds
 
   constructor() {
     this.registry = new Registry();
     this.actionRunId = process.env.GITHUB_RUN_ID || `local_${Date.now()}`;
-    
+    this.repository = process.env.GITHUB_REPOSITORY || 'local-repo';
+    this.workflow = process.env.GITHUB_WORKFLOW || 'local-workflow';
+    this.prometheusUrl = process.env.PROMETHEUS_URL || 'http://localhost:9090';
+
+    // Initialize metrics
     this.webVitalsGauge = new Gauge({
       name: 'synthetic_monitoring_web_vitals',
       help: 'Web Vitals metrics from synthetic monitoring',
@@ -134,6 +146,32 @@ export class PrometheusExporter {
       buckets: [100, 1000, 10000, 100000, 1000000, 10000000],
       registers: [this.registry],
     });
+
+    // Start periodic flush
+    setInterval(() => this.flushMetrics(), this.flushInterval);
+  }
+
+  private sanitizeLabelValue(value: string): string {
+    return value.replace(/[^a-zA-Z0-9_]/g, '_');
+  }
+
+  private async sendMetrics(metrics: string): Promise<void> {
+    try {
+      const response = await fetch(`${this.prometheusUrl}/metrics/job/synthetic_monitoring`, {
+        method: 'POST',
+        body: metrics,
+        headers: {
+          'Content-Type': 'text/plain'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to send metrics: ${response.statusText}`);
+      }
+    } catch (error) {
+      console.error('Error sending metrics to Prometheus:', error);
+      throw error;
+    }
   }
 
   async export(report: MonitoringReport): Promise<void> {
@@ -142,14 +180,14 @@ export class PrometheusExporter {
       browser: environment.browser.name,
       device: environment.browser.device,
       action_run_id: this.actionRunId,
-      repository: process.env.GITHUB_REPOSITORY || 'local',
-      workflow: process.env.GITHUB_WORKFLOW || 'local'
+      repository: this.repository,
+      workflow: this.workflow
     };
 
     try {
       // Clear previous metrics to prevent stale data
       this.registry.resetMetrics();
-      
+
       // Export Web Vitals metrics
       for (const pageMetrics of webVitals) {
         for (const metric of pageMetrics.metrics) {
@@ -297,27 +335,23 @@ export class PrometheusExporter {
         }
       }
 
-      await this.pushMetrics();
+      // Add metrics to buffer instead of pushing immediately
+      const metrics = await this.registry.metrics();
+      this.metricsBuffer.push(metrics);
+
+      // Flush if buffer is full
+      if (this.metricsBuffer.length >= this.maxBufferSize) {
+        await this.flushMetrics();
+      }
     } catch (error) {
       console.error('Error exporting metrics to Prometheus:', error);
       throw error;
     }
   }
 
-  private getPageType(url: string): string {
-    try {
-      const parsedUrl = new URL(url);
-      const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
-      
-      if (pathParts.length === 0) return 'homepage';
-      if (pathParts.length === 1) return pathParts[0];
-      return pathParts.join('_');
-    } catch (e) {
-      return 'unknown';
-    }
-  }
+  private async flushMetrics(): Promise<void> {
+    if (this.metricsBuffer.length === 0) return;
 
-  private async pushMetrics(): Promise<void> {
     const pushgatewayUrl = process.env.PROMETHEUS_PUSHGATEWAY;
     if (!pushgatewayUrl) {
       throw new Error('PROMETHEUS_PUSHGATEWAY environment variable not set');
@@ -325,10 +359,11 @@ export class PrometheusExporter {
 
     const maxRetries = 3;
     let retryCount = 0;
+    const metrics = this.metricsBuffer.join('\n');
+    this.metricsBuffer = [];
 
     while (retryCount < maxRetries) {
       try {
-        const metrics = await this.registry.metrics();
         const response = await fetch(`${pushgatewayUrl}/metrics/job/synthetic_monitoring`, {
           method: 'POST',
           body: metrics,
@@ -346,10 +381,25 @@ export class PrometheusExporter {
         retryCount++;
         if (retryCount === maxRetries) {
           console.error('Error pushing metrics to Prometheus Pushgateway after retries:', error);
+          // Store failed metrics for next attempt
+          this.metricsBuffer.push(metrics);
           throw error;
         }
-        await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+        await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount)));
       }
+    }
+  }
+
+  private getPageType(url: string): string {
+    try {
+      const parsedUrl = new URL(url);
+      const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+      
+      if (pathParts.length === 0) return 'homepage';
+      if (pathParts.length === 1) return pathParts[0];
+      return pathParts.join('_');
+    } catch (e) {
+      return 'unknown';
     }
   }
 }
