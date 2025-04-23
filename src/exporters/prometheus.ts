@@ -170,7 +170,7 @@ export class PrometheusExporter {
       }
 
       // Export Test Metrics
-      const sanitizedTitle = testMetrics.labels.testTitle.replace(/[^a-zA-Z0-9_]/g, '_');
+      const sanitizedTitle = (testMetrics.labels.testTitle || 'unknown').replace(/[^a-zA-Z0-9_]/g, '_');
       const commonLabels = {
         ...baseLabels,
         url: testMetrics.labels.url,
