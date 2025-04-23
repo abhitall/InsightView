@@ -93,9 +93,8 @@ export class PrometheusExporter {
 
       // Export Test Metrics
       const sanitizedTitle = testMetrics.labels.testTitle.replace(/[^a-zA-Z0-9_]/g, '_');
-      const testLabels = {
+      const commonLabels = {
         ...baseLabels,
-        metric: 'duration',
         url: testMetrics.labels.url,
         test_id: testMetrics.labels.testId,
         test_title: sanitizedTitle,
@@ -103,8 +102,80 @@ export class PrometheusExporter {
         status: testMetrics.status,
       };
 
-      console.log('Setting test metric with labels:', testLabels);
-      this.testMetricsGauge.set(testLabels, testMetrics.duration);
+      // Export core test metrics
+      this.testMetricsGauge.set(
+        { ...commonLabels, metric: 'duration' },
+        testMetrics.duration
+      );
+
+      this.testMetricsGauge.set(
+        { ...commonLabels, metric: 'retries' },
+        testMetrics.retries
+      );
+
+      // Export test steps metrics if available
+      if (testMetrics.steps) {
+        testMetrics.steps.forEach((step, index) => {
+          this.testMetricsGauge.set(
+            { ...commonLabels, metric: `step_${index}_duration` },
+            step.duration
+          );
+        });
+      }
+
+      // Export resource metrics if available
+      if (testMetrics.resourceStats) {
+        this.testMetricsGauge.set(
+          { ...commonLabels, metric: 'total_requests' },
+          testMetrics.resourceStats.totalRequests
+        );
+        this.testMetricsGauge.set(
+          { ...commonLabels, metric: 'failed_requests' },
+          testMetrics.resourceStats.failedRequests
+        );
+        this.testMetricsGauge.set(
+          { ...commonLabels, metric: 'total_bytes' },
+          testMetrics.resourceStats.totalBytes
+        );
+        this.testMetricsGauge.set(
+          { ...commonLabels, metric: 'load_time' },
+          testMetrics.resourceStats.loadTime
+        );
+      }
+
+      // Export navigation metrics if available
+      if (testMetrics.navigationStats) {
+        this.testMetricsGauge.set(
+          { ...commonLabels, metric: 'dom_content_loaded' },
+          testMetrics.navigationStats.domContentLoaded
+        );
+        this.testMetricsGauge.set(
+          { ...commonLabels, metric: 'load' },
+          testMetrics.navigationStats.load
+        );
+        this.testMetricsGauge.set(
+          { ...commonLabels, metric: 'first_paint' },
+          testMetrics.navigationStats.firstPaint
+        );
+      }
+
+      // Export assertion metrics if available
+      if (testMetrics.assertions) {
+        this.testMetricsGauge.set(
+          { ...commonLabels, metric: 'total_assertions' },
+          testMetrics.assertions.total
+        );
+        this.testMetricsGauge.set(
+          { ...commonLabels, metric: 'passed_assertions' },
+          testMetrics.assertions.passed
+        );
+        this.testMetricsGauge.set(
+          { ...commonLabels, metric: 'failed_assertions' },
+          testMetrics.assertions.failed
+        );
+      }
+
+      console.log('Setting test metrics with labels:', commonLabels);
 
       await this.pushMetrics();
     } catch (error) {

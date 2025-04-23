@@ -75,6 +75,10 @@ export interface TestMetrics {
   status: 'passed' | 'failed' | 'skipped';
   name: string;
   retries: number;
+  steps: TestStep[];
+  resourceStats: ResourceMetrics;
+  navigationStats: NavigationMetrics;
+  assertions: AssertionMetrics;
   labels: {
     testId: TestInfo['testId'];
     testTitle: string;
