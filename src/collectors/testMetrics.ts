@@ -331,7 +331,7 @@ export async function collectTestMetrics(page: Page, testInfo: TestInfo, startTi
     metrics.status = 'failed';
   } finally {
     // Remove route handler
-    await page.unroute('**', routeHandler);
+    await page.unroute('**/api/**', routeHandler);
   }
 
   return metrics;
