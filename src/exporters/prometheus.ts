@@ -29,7 +29,8 @@ export class PrometheusExporter {
         'device',
         'action_run_id',
         'repository',
-        'workflow'
+        'workflow',
+        'status'
       ],
       registers: [this.registry],
     });
@@ -48,8 +49,7 @@ export class PrometheusExporter {
         'status',
         'action_run_id',
         'repository',
-        'workflow',
-        'timestamp'
+        'workflow'
       ],
       registers: [this.registry],
     });
@@ -86,7 +86,8 @@ export class PrometheusExporter {
         'action_run_id',
         'repository',
         'workflow',
-        'timestamp'
+        'timestamp',
+        'status'
       ],
       buckets: [10, 50, 100, 250, 500, 1000, 2500, 5000],
       registers: [this.registry],
@@ -106,7 +107,8 @@ export class PrometheusExporter {
         'action_run_id',
         'repository',
         'workflow',
-        'timestamp'
+        'timestamp',
+        'status'
       ],
       buckets: [10, 50, 100, 250, 500, 1000, 2500, 5000],
       registers: [this.registry],
@@ -126,7 +128,8 @@ export class PrometheusExporter {
         'action_run_id',
         'repository',
         'workflow',
-        'timestamp'
+        'timestamp',
+        'status'
       ],
       buckets: [100, 1000, 10000, 100000, 1000000, 10000000],
       registers: [this.registry],
