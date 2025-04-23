@@ -227,7 +227,10 @@ export async function collectTestMetrics(page: Page, testInfo: TestInfo, startTi
       await route.continue();
 
       // Wait for response
-      const response = await page.waitForResponse((res) => res.url() === url);
+      const response = await page.waitForResponse((res) => {
+        const request = res.request();
+        return res.url() === url && request.method() === method;
+      });
       const endTime = Date.now();
       const duration = endTime - startTime;
       const status = response.status();
