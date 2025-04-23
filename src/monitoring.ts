@@ -26,13 +26,27 @@ export const test = base.extend<{
         
         // Collect web vitals
         const webVitals = await collectWebVitals(page);
-        collectedMetrics.webVitals.push(webVitals);
-        console.log(`Collected ${webVitals.metrics.length} web vitals metrics`);
+        
+        // Add test metadata to web vitals
+        const enrichedWebVitals: WebVitalsData = {
+          ...webVitals,
+          testId: testInfo.testId,
+          testTitle: testInfo.title,
+          pageIndex: collectedMetrics.webVitals.length
+        };
+        
+        collectedMetrics.webVitals.push(enrichedWebVitals);
+        console.log(`Collected ${webVitals.metrics.length} web vitals metrics for page ${enrichedWebVitals.pageIndex + 1}`);
 
         // Collect test metrics only once at the end
         if (!collectedMetrics.testMetrics) {
           const testMetrics = await collectTestMetrics(page, testInfo, startTime);
-          collectedMetrics.testMetrics = testMetrics;
+          collectedMetrics.testMetrics = {
+            ...testMetrics,
+            testId: testInfo.testId,
+            testTitle: testInfo.title,
+            timestamp: Date.now()
+          };
           console.log('Collected test metrics');
         }
       } catch (error) {
@@ -48,6 +62,7 @@ export const test = base.extend<{
       try {
         console.log('Sending collected metrics...');
         console.log(`Total pages with web vitals: ${collectedMetrics.webVitals.length}`);
+        console.log(`Test ID: ${testInfo.testId}`);
 
         // Combine all metrics into a single report
         const report: MonitoringReport = {

@@ -34,9 +34,12 @@ export interface ExtendedMetric extends BaseMetric {
 }
 
 export interface WebVitalsData {
-  metrics: ExtendedMetric[];
+  metrics: Metric[];
   timestamp: number;
   url: string;
+  testId: TestInfo['testId'];
+  testTitle: string;
+  pageIndex: number;
 }
 
 export interface TestStep {
@@ -66,14 +69,15 @@ export interface AssertionMetrics {
 
 export interface TestMetrics {
   duration: number;
-  status: string;
+  status: 'passed' | 'failed' | 'skipped';
   name: string;
   retries: number;
-  steps: TestStep[];
-  resourceStats: ResourceMetrics;
-  navigationStats: NavigationMetrics;
-  assertions: AssertionMetrics;
-  currentUrl?: string;  // Added to support URL context in metrics
+  url: string;
+  startTime: number;
+  endTime: number;
+  testId: TestInfo['testId'];
+  testTitle: string;
+  timestamp: number;
 }
 
 export interface BrowserInfo {
@@ -88,12 +92,19 @@ export interface ViewportInfo {
 }
 
 export interface MonitoringReport {
-  webVitals: WebVitalsData | WebVitalsData[];  // Supports single or multiple pages
+  webVitals: WebVitalsData[];
   testMetrics: TestMetrics;
   timestamp: number;
   environment: {
     userAgent: string;
-    viewport: ViewportInfo;
-    browser: BrowserInfo;
+    viewport: {
+      width: number;
+      height: number;
+    };
+    browser: {
+      name: string;
+      version: string;
+      device: string;
+    };
   };
 }
