@@ -34,12 +34,15 @@ export interface ExtendedMetric extends BaseMetric {
 }
 
 export interface WebVitalsData {
-  metrics: Metric[];
-  timestamp: number;
-  url: string;
-  testId: TestInfo['testId'];
-  testTitle: string;
-  pageIndex: number;
+  metrics: Array<Metric & {
+    labels: {
+      testId: TestInfo['testId'];
+      testTitle: string;
+      pageIndex: number;
+      timestamp: number;
+      url: string;
+    };
+  }>;
 }
 
 export interface TestStep {
@@ -72,12 +75,12 @@ export interface TestMetrics {
   status: 'passed' | 'failed' | 'skipped';
   name: string;
   retries: number;
-  url: string;
-  startTime: number;
-  endTime: number;
-  testId: TestInfo['testId'];
-  testTitle: string;
-  timestamp: number;
+  labels: {
+    testId: TestInfo['testId'];
+    testTitle: string;
+    timestamp: number;
+    url: string;
+  };
 }
 
 export interface BrowserInfo {

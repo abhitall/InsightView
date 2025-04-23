@@ -29,23 +29,32 @@ export const test = base.extend<{
         
         // Add test metadata to web vitals
         const enrichedWebVitals: WebVitalsData = {
-          ...webVitals,
-          testId: testInfo.testId,
-          testTitle: testInfo.title,
-          pageIndex: collectedMetrics.webVitals.length
+          metrics: webVitals.metrics.map(metric => ({
+            ...metric,
+            labels: {
+              testId: testInfo.testId,
+              testTitle: testInfo.title,
+              pageIndex: collectedMetrics.webVitals.length,
+              timestamp: Date.now(),
+              url: page.url()
+            }
+          }))
         };
         
         collectedMetrics.webVitals.push(enrichedWebVitals);
-        console.log(`Collected ${webVitals.metrics.length} web vitals metrics for page ${enrichedWebVitals.pageIndex + 1}`);
+        console.log(`Collected ${webVitals.metrics.length} web vitals metrics for page ${collectedMetrics.webVitals.length}`);
 
         // Collect test metrics only once at the end
         if (!collectedMetrics.testMetrics) {
           const testMetrics = await collectTestMetrics(page, testInfo, startTime);
           collectedMetrics.testMetrics = {
             ...testMetrics,
-            testId: testInfo.testId,
-            testTitle: testInfo.title,
-            timestamp: Date.now()
+            labels: {
+              testId: testInfo.testId,
+              testTitle: testInfo.title,
+              timestamp: Date.now(),
+              url: page.url()
+            }
           };
           console.log('Collected test metrics');
         }
