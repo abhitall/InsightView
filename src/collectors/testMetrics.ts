@@ -256,7 +256,7 @@ export async function collectTestMetrics(page: Page, testInfo: TestInfo, startTi
   };
 
   // Add route handler
-  await page.route('**', routeHandler);
+  await page.route('**/api/**', routeHandler);
 
   try {
     // Collect performance metrics
