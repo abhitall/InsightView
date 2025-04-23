@@ -1,4 +1,4 @@
-import type { Page, TestInfo } from '@playwright/test';
+import type { Page, TestInfo, Route, Request } from '@playwright/test';
 import type { TestMetrics, TestStep, ResourceMetrics, NavigationMetrics, AssertionMetrics, ApiMetrics } from '../types';
 import fs from 'fs';
 
@@ -165,85 +165,163 @@ async function collectApiMetrics(page: Page): Promise<ApiMetrics[]> {
 }
 
 export async function collectTestMetrics(page: Page, testInfo: TestInfo, startTime: number): Promise<TestMetrics> {
-  const endTime = Date.now();
-  const duration = endTime - startTime;
-
-  // Collect test steps with estimated durations
-  const stepCount = testInfo.titlePath.length;
-  const estimatedStepDuration = Math.floor(duration / stepCount);
-  const steps: TestStep[] = testInfo.titlePath.map((title, index) => {
-    const isLastStep = index === stepCount - 1;
-    const stepDuration = isLastStep ? duration - (estimatedStepDuration * (stepCount - 1)) : estimatedStepDuration;
-    return {
-      name: title,
-      duration: stepDuration,
-      status: testInfo.status === 'passed' ? 'passed' : 'failed'
-    };
-  });
-
-  // Collect resource and navigation metrics using helper functions
-  let resourceStats: ResourceMetrics;
-  let navigationStats: NavigationMetrics;
-  let apiMetrics: ApiMetrics[] | undefined;
-
-  try {
-    // Start API metrics collection
-    const apiMetricsPromise = collectApiMetrics(page);
-    
-    // Collect other metrics in parallel
-    [resourceStats, navigationStats, apiMetrics] = await Promise.all([
-      collectResourceMetrics(page),
-      collectNavigationMetrics(page),
-      apiMetricsPromise
-    ]);
-  } catch (error) {
-    console.error('Error collecting performance metrics:', error);
-    resourceStats = {
+  const metrics: TestMetrics = {
+    duration: 0,
+    status: 'passed',
+    name: testInfo.title,
+    retries: testInfo.retry,
+    labels: {
+      testId: testInfo.testId,
+      testTitle: testInfo.title,
+      timestamp: Date.now(),
+      url: page.url()
+    },
+    steps: [],
+    resourceStats: {
       totalRequests: 0,
       failedRequests: 0,
       totalBytes: 0,
       loadTime: 0
-    };
-    navigationStats = {
+    },
+    navigationStats: {
       domContentLoaded: 0,
       load: 0,
       firstPaint: 0
-    };
-  }
-
-  // Collect assertion metrics
-  const assertions: AssertionMetrics = {
-    total: testInfo.annotations.length,
-    passed: testInfo.annotations.filter(a => a.type !== 'error').length,
-    failed: testInfo.annotations.filter(a => a.type === 'error').length
-  };
-
-  // Map Playwright status to our status type
-  const status = testInfo.status === 'passed' ? 'passed' :
-                 testInfo.status === 'failed' ? 'failed' :
-                 'skipped';
-
-  // Save sanitized test info for debugging
-  const sanitizedTestInfo = sanitizeTestInfo(testInfo);
-  fs.writeFileSync('testInfo.json', JSON.stringify(sanitizedTestInfo, null, 2));
-
-  const metrics: TestMetrics = {
-    duration,
-    status,
-    name: testInfo.title,
-    retries: testInfo.retry,
-    steps,
-    resourceStats,
-    navigationStats,
-    assertions,
-    apiMetrics,
-    labels: {
-      testId: testInfo.testId,
-      testTitle: testInfo.title,
-      timestamp: endTime,
-      url: page.url()
+    },
+    assertions: {
+      total: 0,
+      passed: 0,
+      failed: 0
     }
   };
+
+  // Track API requests with retry handling
+  const apiRequests = new Map<string, { count: number, lastAttempt: number }>();
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY = 1000; // 1 second
+
+  // Set up route interception for API metrics
+  const routeHandler = async (route: Route, request: Request) => {
+    const url = request.url();
+    const method = request.method();
+    const startTime = Date.now();
+
+    try {
+      // Check if this is a retry
+      const requestKey = `${method}:${url}`;
+      const requestInfo = apiRequests.get(requestKey) || { count: 0, lastAttempt: 0 };
+      
+      if (requestInfo.count > 0) {
+        const timeSinceLastAttempt = Date.now() - requestInfo.lastAttempt;
+        if (timeSinceLastAttempt < RETRY_DELAY) {
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY - timeSinceLastAttempt));
+        }
+      }
+
+      // Update request info
+      requestInfo.count++;
+      requestInfo.lastAttempt = Date.now();
+      apiRequests.set(requestKey, requestInfo);
+
+      // Continue with the request
+      await route.continue();
+
+      // Wait for response
+      const response = await page.waitForResponse((res) => res.url() === url);
+      const endTime = Date.now();
+      const duration = endTime - startTime;
+      const status = response.status();
+      const success = status >= 200 && status < 300;
+
+      // Log API metrics
+      console.log(`API Request: ${method} ${url}`, {
+        status,
+        duration,
+        success,
+        retryCount: requestInfo.count - 1
+      });
+
+      // Handle retries for failed requests
+      if (!success && requestInfo.count <= MAX_RETRIES) {
+        console.log(`Retrying failed request (${requestInfo.count}/${MAX_RETRIES}): ${method} ${url}`);
+        // The request will be retried automatically due to the route handler
+        return;
+      }
+
+    } catch (error) {
+      console.error('Error handling API request:', error);
+      // Continue with the request even if there's an error
+      await route.continue();
+    }
+  };
+
+  // Add route handler
+  await page.route('**', routeHandler);
+
+  try {
+    // Collect performance metrics
+    const performanceMetrics = await page.evaluate(() => {
+      const resources = performance.getEntriesByType('resource');
+      const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming;
+      
+      return {
+        resources: resources.map(entry => ({
+          name: entry.name,
+          duration: entry.duration,
+          initiatorType: entry.initiatorType,
+          transferSize: (entry as PerformanceResourceTiming).transferSize || 0,
+          responseStatus: (entry as PerformanceResourceTiming).responseStatus || 0
+        })),
+        navigation: navigation ? {
+          domContentLoaded: navigation.domContentLoadedEventEnd - navigation.startTime,
+          load: navigation.loadEventEnd - navigation.startTime,
+          firstPaint: performance.getEntriesByName('first-paint')[0]?.startTime || 0
+        } : null
+      };
+    });
+
+    // Update metrics with collected data
+    metrics.resourceStats = {
+      totalRequests: performanceMetrics.resources.length,
+      failedRequests: performanceMetrics.resources.filter(r => r.responseStatus === 0).length,
+      totalBytes: performanceMetrics.resources.reduce((sum, r) => sum + r.transferSize, 0),
+      loadTime: Math.max(...performanceMetrics.resources.map(r => r.duration), 0)
+    };
+
+    if (performanceMetrics.navigation) {
+      metrics.navigationStats = {
+        domContentLoaded: performanceMetrics.navigation.domContentLoaded,
+        load: performanceMetrics.navigation.load,
+        firstPaint: performanceMetrics.navigation.firstPaint
+      };
+    }
+
+    // Calculate test duration
+    metrics.duration = Date.now() - startTime;
+
+    // Collect test steps
+    const steps = await page.evaluate(() => {
+      const steps: TestStep[] = [];
+      const elements = document.querySelectorAll('[data-test-step]');
+      for (const element of elements) {
+        steps.push({
+          name: element.getAttribute('data-test-step') || '',
+          duration: parseInt(element.getAttribute('data-test-duration') || '0', 10),
+          status: element.getAttribute('data-test-status') || 'passed'
+        });
+      }
+      return steps;
+    });
+
+    metrics.steps = steps;
+
+  } catch (error) {
+    console.error('Error collecting test metrics:', error);
+    metrics.status = 'failed';
+  } finally {
+    // Remove route handler
+    await page.unroute('**', routeHandler);
+  }
 
   return metrics;
 }
