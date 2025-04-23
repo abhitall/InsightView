@@ -114,9 +114,6 @@ export async function collectTestMetrics(page: Page, testInfo: TestInfo, startTi
   const endTime = Date.now();
   const duration = endTime - startTime;
 
-  console.log(`Collecting test metrics for: ${testInfo.title}`);
-  console.log(`Test duration: ${duration}ms`);
-
   // Collect test steps with estimated durations
   const stepCount = testInfo.titlePath.length;
   const estimatedStepDuration = Math.floor(duration / stepCount);
@@ -129,8 +126,6 @@ export async function collectTestMetrics(page: Page, testInfo: TestInfo, startTi
       status: testInfo.status === 'passed' ? 'passed' : 'failed'
     };
   });
-
-  console.log(`Collected ${steps.length} test steps`);
 
   // Collect resource and navigation metrics using helper functions
   let resourceStats: ResourceMetrics;
@@ -203,7 +198,6 @@ export async function collectTestMetrics(page: Page, testInfo: TestInfo, startTi
     const apiRequests = await collectApiMetrics(page);
     if (apiRequests.length > 0) {
       apiMetrics = apiRequests;
-      console.log(`Collected ${apiRequests.length} API metrics with response data`);
     }
   } catch (error) {
     console.error('Error collecting API metrics:', error);
@@ -215,8 +209,6 @@ export async function collectTestMetrics(page: Page, testInfo: TestInfo, startTi
     passed: testInfo.annotations.filter(a => a.type !== 'error').length,
     failed: testInfo.annotations.filter(a => a.type === 'error').length
   };
-
-  console.log(`Assertion metrics: ${assertions.total} total, ${assertions.passed} passed, ${assertions.failed} failed`);
 
   // Map Playwright status to our status type
   const status = testInfo.status === 'passed' ? 'passed' :
@@ -245,6 +237,5 @@ export async function collectTestMetrics(page: Page, testInfo: TestInfo, startTi
     }
   };
 
-  console.log('Test metrics collection complete');
   return metrics;
 }

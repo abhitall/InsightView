@@ -162,9 +162,9 @@ export class PrometheusExporter {
             test_title: sanitizedTitle,
             page_index: String(metric.labels.pageIndex),
             timestamp: String(metric.labels.timestamp),
+            status: testMetrics.status
           };
 
-          console.log(`Setting web vital metric: ${metric.name} with labels:`, labels);
           this.webVitalsGauge.set(labels, metric.value);
         }
       }
@@ -272,6 +272,7 @@ export class PrometheusExporter {
             status_code: String(apiMetric.statusCode),
             test_id: testMetrics.labels.testId,
             test_title: sanitizedTitle,
+            status: testMetrics.status
           };
 
           // Record API duration
@@ -295,8 +296,6 @@ export class PrometheusExporter {
           );
         }
       }
-
-      console.log('Setting test metrics with labels:', commonLabels);
 
       await this.pushMetrics();
     } catch (error) {
@@ -330,9 +329,6 @@ export class PrometheusExporter {
     while (retryCount < maxRetries) {
       try {
         const metrics = await this.registry.metrics();
-        console.log('Raw metrics being pushed to Prometheus:');
-        console.log(metrics);
-        
         const response = await fetch(`${pushgatewayUrl}/metrics/job/synthetic_monitoring`, {
           method: 'POST',
           body: metrics,
@@ -345,8 +341,6 @@ export class PrometheusExporter {
           const errorText = await response.text();
           throw new Error(`Failed to push metrics to Pushgateway: ${response.status} ${response.statusText}\n${errorText}`);
         }
-        
-        console.log('Successfully pushed metrics to Prometheus Pushgateway');
         return;
       } catch (error) {
         retryCount++;
@@ -354,7 +348,6 @@ export class PrometheusExporter {
           console.error('Error pushing metrics to Prometheus Pushgateway after retries:', error);
           throw error;
         }
-        console.warn(`Retry ${retryCount} of ${maxRetries} after error:`, error);
         await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
       }
     }
