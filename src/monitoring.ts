@@ -1,84 +1,88 @@
-import { test as base } from '@playwright/test';
-import type { Page, TestType } from '@playwright/test';
+import { test as base, type Page, type TestInfo } from '@playwright/test';
 import { collectWebVitals } from './collectors/webVitals';
 import { collectTestMetrics } from './collectors/testMetrics';
 import { PrometheusExporter } from './exporters/prometheus';
 import { S3Exporter } from './exporters/s3';
-import type { MonitoringReport } from './types';
+import type { WebVitalsData, TestMetrics, MonitoringReport } from './types';
 
-const prometheusExporter = new PrometheusExporter();
-const s3Exporter = new S3Exporter();
-
-type MonitoringFixture = (pages?: Page[] | void) => Promise<void>;
-
-interface TestFixtures {
-  monitoring: MonitoringFixture;
-}
-
-// Store metrics per test
-const testMetricsMap = new Map<string, Array<{
-  webVitals: any;
-  timestamp: number;
-  pageUrl: string;
-}>>();
-
-export const test = base.extend<TestFixtures>({
+// Extend the base test with our monitoring fixture
+export const test = base.extend<{
+  monitoring: () => Promise<void>;
+}>({
   monitoring: async ({ page, browserName }, use, testInfo) => {
     const startTime = Date.now();
-    const testId = testInfo.testId;
-    
-    // Initialize metrics array for this test if not exists
-    if (!testMetricsMap.has(testId)) {
-      testMetricsMap.set(testId, []);
-    }
-    
-    await use(async (pages?: Page[] | void) => {
-      // Collect Web Vitals from the specified pages or current page
-      const targetPages = pages ? pages : [page];
-      
-      for (const targetPage of targetPages) {
-        const timestamp = Date.now();
-        const webVitals = await collectWebVitals(targetPage);
-        
-        // Store metrics with timestamp and page URL
-        testMetricsMap.get(testId)?.push({
-          webVitals,
-          timestamp,
-          pageUrl: targetPage.url()
-        });
-      }
-      
-      // After collecting all metrics for this test step
-      const allMetrics = testMetricsMap.get(testId) || [];
-      const testMetrics = await collectTestMetrics(page, testInfo, startTime);
-      
-      const report: MonitoringReport = {
-        webVitals: allMetrics.map(m => ({
-          ...m.webVitals,
-          timestamp: m.timestamp,
-          testId,
-          testTitle: testInfo.title
-        })),
-        testMetrics,
-        timestamp: Date.now(),
-        environment: {
-          userAgent: await page.evaluate(() => navigator.userAgent),
-          viewport: page.viewportSize() || { width: 0, height: 0 },
-          browser: {
-            name: browserName,
-            version: await page.evaluate(() => navigator.userAgent.match(/Chrome\/([0-9.]+)/)?.[1] || ''),
-            device: testInfo.project.name,
-          },
-        },
-      };
+    const collectedMetrics: {
+      webVitals: WebVitalsData[];
+      testMetrics: TestMetrics | null;
+    } = {
+      webVitals: [],
+      testMetrics: null
+    };
 
-      await Promise.all([
-        prometheusExporter.export(report),
-        s3Exporter.export(report, testInfo),
-      ]);
-    });
-    
-    // Clean up metrics after test completion
-    testMetricsMap.delete(testId);
-  },
+    // Create the monitoring function that collects metrics
+    const monitoring = async () => {
+      try {
+        console.log(`Collecting metrics for page: ${page.url()}`);
+        
+        // Collect web vitals
+        const webVitals = await collectWebVitals(page);
+        collectedMetrics.webVitals.push(webVitals);
+        console.log(`Collected ${webVitals.metrics.length} web vitals metrics`);
+
+        // Collect test metrics only once at the end
+        if (!collectedMetrics.testMetrics) {
+          const testMetrics = await collectTestMetrics(page, testInfo, startTime);
+          collectedMetrics.testMetrics = testMetrics;
+          console.log('Collected test metrics');
+        }
+      } catch (error) {
+        console.error('Error collecting metrics:', error);
+      }
+    };
+
+    // Use the monitoring function
+    await use(monitoring);
+
+    // After the test completes, send all collected metrics
+    if (collectedMetrics.webVitals.length > 0 || collectedMetrics.testMetrics) {
+      try {
+        console.log('Sending collected metrics...');
+        console.log(`Total pages with web vitals: ${collectedMetrics.webVitals.length}`);
+
+        // Combine all metrics into a single report
+        const report: MonitoringReport = {
+          webVitals: collectedMetrics.webVitals,
+          testMetrics: collectedMetrics.testMetrics!,
+          timestamp: Date.now(),
+          environment: {
+            userAgent: await page.evaluate(() => navigator.userAgent),
+            viewport: page.viewportSize() || { width: 0, height: 0 },
+            browser: {
+              name: browserName,
+              version: await page.evaluate(() => navigator.userAgent.match(/Chrome\/([0-9.]+)/)?.[1] || ''),
+              device: testInfo.project.name,
+            },
+          },
+        };
+
+        // Send to Prometheus
+        const prometheusExporter = new PrometheusExporter();
+        await prometheusExporter.export(report);
+        console.log('Metrics sent to Prometheus');
+
+        // Send to S3 if configured
+        if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+          const s3Exporter = new S3Exporter();
+          await s3Exporter.export(report, testInfo);
+          console.log('Metrics sent to S3');
+        }
+      } catch (error) {
+        console.error('Error sending collected metrics:', error);
+      }
+    } else {
+      console.log('No metrics collected during test');
+    }
+  }
 });
+
+export { expect } from '@playwright/test';
