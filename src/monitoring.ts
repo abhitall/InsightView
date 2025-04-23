@@ -79,7 +79,15 @@ export const test = base.extend<{
         // Combine all metrics into a single report
         const report: MonitoringReport = {
           webVitals: collectedMetrics.webVitals,
-          testMetrics: collectedMetrics.testMetrics ?? { metrics: [], labels: {} },
+          testMetrics: collectedMetrics.testMetrics ?? { 
+            metrics: [], 
+            labels: { 
+              testId: "unknown", 
+              testTitle: "unknown", 
+              timestamp: 0, 
+              url: "" 
+            } 
+          },
           timestamp: Date.now(),
           environment: {
             userAgent,
