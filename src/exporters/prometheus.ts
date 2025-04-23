@@ -46,30 +46,34 @@ export class PrometheusExporter {
       // Export Web Vitals metrics
       for (const pageMetrics of webVitals) {
         for (const metric of pageMetrics.metrics) {
+          const sanitizedTitle = metric.labels.testTitle.replace(/[^a-zA-Z0-9_]/g, '_');
           const labels = {
             ...baseLabels,
             metric: metric.name,
             url: metric.labels.url,
             test_id: metric.labels.testId,
-            test_title: metric.labels.testTitle,
+            test_title: sanitizedTitle,
             page_index: String(metric.labels.pageIndex),
             timestamp: String(metric.labels.timestamp),
           };
+
           console.log(`Setting web vital metric: ${metric.name} with labels:`, labels);
           this.webVitalsGauge.set(labels, metric.value);
         }
       }
 
       // Export Test Metrics
+      const sanitizedTitle = testMetrics.labels.testTitle.replace(/[^a-zA-Z0-9_]/g, '_');
       const testLabels = {
         ...baseLabels,
         metric: 'duration',
         url: testMetrics.labels.url,
         test_id: testMetrics.labels.testId,
-        test_title: testMetrics.labels.testTitle,
+        test_title: sanitizedTitle,
         timestamp: String(testMetrics.labels.timestamp),
         status: testMetrics.status,
       };
+
       console.log('Setting test metric with labels:', testLabels);
       this.testMetricsGauge.set(testLabels, testMetrics.duration);
 
@@ -101,7 +105,7 @@ export class PrometheusExporter {
 
     try {
       const metrics = await this.registry.metrics();
-      console.log('Metrics being pushed to Prometheus:');
+      console.log('Raw metrics being pushed to Prometheus:');
       console.log(metrics);
       
       const response = await fetch(`${pushgatewayUrl}/metrics/job/synthetic_monitoring`, {
