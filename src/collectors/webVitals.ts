@@ -1,6 +1,14 @@
 import { type Metric } from 'web-vitals';
 import type { Page } from '@playwright/test';
-import type { WebVitalsData } from '../types';
+// Remove direct import of WebVitalsData, it will be implicitly used via MonitoringReport if needed by other parts,
+// or explicitly if this module constructs it (which it doesn't anymore).
+
+// Define the actual shape of data this module collects and returns
+export interface RawWebVitalsCollection {
+  metrics: CombinedMetric[];
+  url: string;
+  timestamp: number;
+}
 
 // Custom metric types to extend web-vitals
 interface CustomPerformanceMetric extends Omit<Metric, 'name' | 'entries'> {
@@ -25,7 +33,7 @@ const ALL_VITALS = [...REQUIRED_VITALS, ...OPTIONAL_VITALS] as const;
 // Pages where we should skip web vitals collection
 const SKIP_VITALS_PAGES = ['about:blank', 'about:srcdoc'];
 
-export async function collectWebVitals(page: Page): Promise<WebVitalsData> {
+export async function collectWebVitals(page: Page): Promise<RawWebVitalsCollection> {
   const url = page.url();
   const startTime = Date.now();
   
@@ -34,8 +42,8 @@ export async function collectWebVitals(page: Page): Promise<WebVitalsData> {
     console.log(`Skipping web vitals collection for special page: ${url}`);
     return {
       metrics: [],
-      timestamp: startTime,
       url: url,
+      timestamp: startTime,
     };
   }
 
@@ -243,16 +251,16 @@ export async function collectWebVitals(page: Page): Promise<WebVitalsData> {
     
     return {
       metrics,
-      timestamp: startTime,
       url: url,
+      timestamp: startTime,
     };
   } catch (error) {
     const elapsedTime = Date.now() - startTime;
     console.error(`Error collecting web vitals for ${url} after ${elapsedTime}ms:`, error);
     return {
       metrics: [],
-      timestamp: startTime,
       url: url,
+      timestamp: startTime,
     };
   }
 }

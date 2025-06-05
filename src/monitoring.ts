@@ -1,9 +1,26 @@
 import { test as base, type Page, type TestInfo } from '@playwright/test';
-import { collectWebVitals } from './collectors/webVitals';
+import { collectWebVitals, RawWebVitalsCollection } from './collectors/webVitals';
 import { collectTestMetrics } from './collectors/testMetrics';
 import { PrometheusExporter } from './exporters/prometheus';
 import { S3Exporter } from './exporters/s3';
 import type { WebVitalsData, TestMetrics, MonitoringReport } from './types';
+
+const prometheusExporter = new PrometheusExporter();
+const monitoringPort = parseInt(process.env.MONITORING_PORT || '8080', 10);
+
+// Start the server when the module is loaded
+prometheusExporter.startServer(monitoringPort).catch(error => {
+  console.error('Failed to start Prometheus server:', error);
+  // Optionally exit if the server is critical
+  // process.exit(1);
+});
+
+// Stop the server when the process exits
+process.on('exit', () => {
+  prometheusExporter.stopServer().catch(error => {
+    console.error('Failed to stop Prometheus server:', error);
+  });
+});
 
 // Extend the base test with our monitoring fixture
 export const test = base.extend<{
@@ -12,7 +29,7 @@ export const test = base.extend<{
   monitoring: async ({ page, browserName }, use, testInfo) => {
     const startTime = Date.now();
     const collectedMetrics: {
-      webVitals: WebVitalsData[];
+      webVitals: WebVitalsData[]; // This will store the fully processed WebVitalsData
       testMetrics: TestMetrics | null;
     } = {
       webVitals: [],
@@ -27,18 +44,18 @@ export const test = base.extend<{
         await page.waitForTimeout(1000); // Additional wait for metrics to stabilize
         
         // Collect web vitals
-        const webVitals = await collectWebVitals(page);
+        const rawWebVitals: RawWebVitalsCollection = await collectWebVitals(page);
         
         // Add test metadata to web vitals
         const enrichedWebVitals: WebVitalsData = {
-          metrics: webVitals.metrics.map(metric => ({
+          metrics: rawWebVitals.metrics.map(metric => ({
             ...metric,
             labels: {
               testId: testInfo.testId,
               testTitle: testInfo.title,
               pageIndex: collectedMetrics.webVitals.length,
-              timestamp: Date.now(),
-              url: page.url()
+              timestamp: rawWebVitals.timestamp, // Use timestamp from collection time
+              url: rawWebVitals.url // Use URL from collection time
             }
           }))
         };
@@ -79,14 +96,35 @@ export const test = base.extend<{
         // Combine all metrics into a single report
         const report: MonitoringReport = {
           webVitals: collectedMetrics.webVitals,
-          testMetrics: collectedMetrics.testMetrics ?? { 
-            metrics: [], 
-            labels: { 
-              testId: "unknown", 
-              testTitle: "unknown", 
-              timestamp: 0, 
-              url: "" 
-            } 
+          testMetrics: collectedMetrics.testMetrics ?? {
+            duration: 0,
+            status: 'skipped', // Default status for missing metrics
+            name: testInfo.title || "unknown", // Use test title or unknown
+            retries: testInfo.retry,
+            steps: [],
+            resourceStats: {
+              totalRequests: 0,
+              failedRequests: 0,
+              totalBytes: 0,
+              loadTime: 0,
+            },
+            navigationStats: {
+              domContentLoaded: 0,
+              load: 0,
+              firstPaint: 0,
+            },
+            assertions: {
+              total: 0,
+              passed: 0,
+              failed: 0,
+            },
+            apiMetrics: [],
+            labels: {
+              testId: testInfo.testId || "unknown",
+              testTitle: testInfo.title || "unknown",
+              timestamp: Date.now(),
+              url: page.url() || "unknown"
+            }
           },
           timestamp: Date.now(),
           environment: {
@@ -100,12 +138,11 @@ export const test = base.extend<{
           },
         };
 
-        // Send to Prometheus with retry
-        const prometheusExporter = new PrometheusExporter();
+        // Export metrics to be available on the /metrics endpoint
         try {
           await prometheusExporter.export(report);
         } catch (error) {
-          console.error('Failed to send metrics to Prometheus:', error);
+          console.error('Failed to export metrics to Prometheus exporter:', error);
           // Continue with S3 export even if Prometheus fails
         }
 

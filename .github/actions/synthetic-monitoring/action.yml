@@ -31,9 +31,10 @@ inputs:
     description: 'Verify TLS certificates for S3 (Do NOT set this for AWS S3 buckets. Only use for non-AWS S3-compatible services)'
     required: false
     default: 'true'
-  prometheus_pushgateway:
-    description: 'Prometheus Pushgateway URL'
-    required: true
+  prometheus_port:
+    description: 'Port for the Prometheus metrics server'
+    required: false
+    default: '8080'
   browser:
     description: 'Browser to use for testing'
     required: false
@@ -101,7 +102,7 @@ runs:
 
         # Add remaining configuration
         cat << EOF >> .env
-        PROMETHEUS_PUSHGATEWAY=${{ inputs.prometheus_pushgateway }}
+        PROMETHEUS_PORT=${{ inputs.prometheus_port }}
         TEST_URL=${{ inputs.test_url }}
         EOF
 

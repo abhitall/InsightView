@@ -22,3 +22,16 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# TypeScript output
+src/**/*.js
+src/**/*.js.map
+src/**/*.d.ts
+
+# GitHub Action TypeScript output (if compiled in place)
+.github/actions/synthetic-monitoring/src/**/*.js
+.github/actions/synthetic-monitoring/src/**/*.js.map
+.github/actions/synthetic-monitoring/src/**/*.d.ts
+.github/actions/synthetic-monitoring/global-setup.js
+.github/actions/synthetic-monitoring/global-setup.js.map
+.github/actions/synthetic-monitoring/global-setup.d.ts

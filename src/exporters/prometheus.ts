@@ -1,8 +1,10 @@
 import { Registry, Gauge, Histogram } from 'prom-client';
 import type { MonitoringReport } from '../types';
+import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
 
 export class PrometheusExporter {
   private registry: Registry;
+  private server: Server | undefined;
   private webVitalsGauge: Gauge;
   private testMetricsGauge: Gauge;
   private testDurationHistogram: Histogram;
@@ -14,7 +16,7 @@ export class PrometheusExporter {
   constructor() {
     this.registry = new Registry();
     this.actionRunId = process.env.GITHUB_RUN_ID || `local_${Date.now()}`;
-    
+
     this.webVitalsGauge = new Gauge({
       name: 'synthetic_monitoring_web_vitals',
       help: 'Web Vitals metrics from synthetic monitoring',
@@ -297,9 +299,9 @@ export class PrometheusExporter {
         }
       }
 
-      await this.pushMetrics();
+      // Metrics are now exposed via HTTP server, no need to push.
     } catch (error) {
-      console.error('Error exporting metrics to Prometheus:', error);
+      console.error('Error exporting metrics:', error);
       throw error;
     }
   }
@@ -317,39 +319,56 @@ export class PrometheusExporter {
     }
   }
 
-  private async pushMetrics(): Promise<void> {
-    const pushgatewayUrl = process.env.PROMETHEUS_PUSHGATEWAY;
-    if (!pushgatewayUrl) {
-      throw new Error('PROMETHEUS_PUSHGATEWAY environment variable not set');
-    }
-
-    const maxRetries = 3;
-    let retryCount = 0;
-
-    while (retryCount < maxRetries) {
-      try {
-        const metrics = await this.registry.metrics();
-        const response = await fetch(`${pushgatewayUrl}/metrics/job/synthetic_monitoring`, {
-          method: 'POST',
-          body: metrics,
-          headers: {
-            'Content-Type': 'text/plain',
-          },
-        });
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Failed to push metrics to Pushgateway: ${response.status} ${response.statusText}\n${errorText}`);
+  async startServer(port: number): Promise<void> {
+    this.server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+      if (req.url === '/metrics') {
+        try {
+          const metrics = await this.registry.metrics();
+          res.setHeader('Content-Type', this.registry.contentType);
+          res.end(metrics);
+        } catch (ex) {
+          res.statusCode = 500;
+          res.end(ex instanceof Error ? ex.message : String(ex));
         }
-        return;
-      } catch (error) {
-        retryCount++;
-        if (retryCount === maxRetries) {
-          console.error('Error pushing metrics to Prometheus Pushgateway after retries:', error);
-          throw error;
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+      } else {
+        res.statusCode = 404;
+        res.end('Not Found');
       }
-    }
+    });
+
+    return new Promise((resolve, reject) => {
+      if (!this.server) {
+        return reject(new Error("Server not initialized"));
+      }
+      this.server.listen(port, () => {
+        console.log(`Prometheus metrics server listening on port ${port}`);
+        resolve();
+      });
+      this.server.on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE') {
+          console.error(`Error: Port ${port} is already in use. Failed to start Prometheus metrics server.`);
+        } else {
+          console.error('Failed to start Prometheus metrics server:', err);
+        }
+        reject(err);
+      });
+    });
+  }
+
+  async stopServer(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (this.server) {
+        this.server.close((err) => {
+          if (err) {
+            console.error('Error stopping Prometheus metrics server:', err);
+            return reject(err);
+          }
+          console.log('Prometheus metrics server stopped.');
+          resolve();
+        });
+      } else {
+        resolve(); // No server to stop
+      }
+    });
   }
 }

@@ -34,7 +34,7 @@ export interface ExtendedMetric extends BaseMetric {
 }
 
 export interface WebVitalsData {
-  metrics: Array<Metric & {
+  metrics: Array<ExtendedMetric & {
     labels: {
       testId: TestInfo['testId'];
       testTitle: string;
