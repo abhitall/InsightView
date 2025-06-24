@@ -52,46 +52,58 @@ inputs:
     default: '{}'
 
 runs:
-  using: "composite"
-  steps:
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-        cache: 'npm'
+  using: "docker"
+  # This image will be built and pushed by the .github/workflows/publish-docker.yml workflow
+  # It uses ghcr.io/OWNER/REPO-action:tag format
+  image: "docker://ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}-action:latest" # Or a specific tag/SHA
+  # The entrypoint script is expected to be in the image, copied by the Dockerfile's `COPY . .` command.
+  # Its path within the image will be ./.github/actions/synthetic-monitoring/scripts/docker-entrypoint.sh
+  # However, GitHub Actions Docker runs typically execute commands from the GITHUB_WORKSPACE,
+  # so the script will be at: .github/actions/synthetic-monitoring/scripts/docker-entrypoint.sh
+  # We need to make it executable if not already. The Dockerfile doesn't do this.
+  # The action runner will make it executable.
 
-    - name: Install system dependencies
+  # Environment variables for the Docker container are automatically created from inputs.
+  # e.g., inputs.test_url becomes INPUT_TEST_URL
+
+  # The command to run inside the Docker container.
+  # This will execute the script that sources .env and then runs the tests.
+  entrypoint: ".github/actions/synthetic-monitoring/scripts/docker-entrypoint.sh"
+
+  # Steps to run on the runner *before* the Docker container starts.
+  # We still need to create the .env file here, as it uses secrets.
+  # This .env file will be available in the Docker container's GITHUB_WORKSPACE.
+  pre-steps:
+    - name: Setup environment file
       shell: bash
       run: |
-        if command -v apt-get >/dev/null; then
-          apt-get update && apt-get install -y jq
-        elif command -v apk >/dev/null; then
-          apk add --no-cache jq
-        else
-          echo "Package manager not found, attempting to continue..."
+        # Ensure jq is available on the runner for this step
+        if ! command -v jq &> /dev/null; then
+            echo "jq could not be found, trying to install."
+            if command -v apt-get >/dev/null; then
+              sudo apt-get update && sudo apt-get install -y jq
+            elif command -v apk >/dev/null; then
+              sudo apk add --no-cache jq
+            elif command -v yum >/dev/null; then
+              sudo yum install -y jq
+            else
+              echo "Error: jq is not installed and could not be installed. Cannot parse env_vars."
+              exit 1
+            fi
         fi
 
-    - name: Install dependencies
-      shell: bash
-      run: npm ci
-
-    - name: Install Playwright
-      shell: bash
-      run: npx playwright install --with-deps ${{ inputs.browser }}
-
-    - name: Setup environment
-      shell: bash
-      run: |
         # Infrastructure secrets
         cat << EOF > .env
         AWS_ACCESS_KEY_ID=${{ inputs.aws_access_key_id }}
         AWS_SECRET_ACCESS_KEY=${{ inputs.aws_secret_access_key }}
         AWS_REGION=${{ inputs.aws_region }}
         S3_BUCKET=${{ inputs.s3_bucket }}
+        PROMETHEUS_PUSHGATEWAY=${{ inputs.prometheus_pushgateway }}
+        TEST_URL=${{ inputs.test_url }}
         EOF
 
         # Only add S3 endpoint configuration for non-AWS S3 services
-        if [ ! -z "${{ inputs.s3_endpoint }}" ]; then
+        if [ -n "${{ inputs.s3_endpoint }}" ]; then
           cat << EOF >> .env
         S3_ENDPOINT=${{ inputs.s3_endpoint }}
         S3_FORCE_PATH_STYLE=${{ inputs.s3_force_path_style }}
@@ -99,30 +111,16 @@ runs:
         EOF
         fi
 
-        # Add remaining configuration
-        cat << EOF >> .env
-        PROMETHEUS_PUSHGATEWAY=${{ inputs.prometheus_pushgateway }}
-        TEST_URL=${{ inputs.test_url }}
-        EOF
-
         # Add custom environment variables if provided
-        if [ ! -z "${{ inputs.env_vars }}" ]; then
+        if [ -n "${{ inputs.env_vars }}" ] && [ "${{ inputs.env_vars }}" != "{}" ]; then
+          echo "Processing env_vars: ${{ inputs.env_vars }}"
           echo "${{ inputs.env_vars }}" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' >> .env
         fi
+        echo "Generated .env file content:"
+        cat .env
 
-    - name: Create test directories
-      shell: bash
-      run: mkdir -p playwright-report test-results
-
-    - name: Run synthetic tests
-      shell: bash
-      run: |
-        if [ -n "${{ inputs.config_path }}" ]; then
-          npm run test:synthetic -- --config="${{ inputs.config_path }}" --project=${{ inputs.browser }}
-        else
-          npm run test:synthetic -- --project=${{ inputs.browser }}
-        fi
-
+  # Steps to run on the runner *after* the Docker container finishes.
+  post-steps:
     - name: Upload Playwright report
       if: always()
       uses: actions/upload-artifact@v4
