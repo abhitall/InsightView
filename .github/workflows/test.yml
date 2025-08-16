@@ -3,7 +3,7 @@ name: Test Action
 on:
   pull_request:
     paths:
-      - '.github/actions/synthetic-monitoring/**'
+      - 'action.yml'
       - 'src/**'
       - 'tests/**'
       - 'package.json'
@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run Synthetic Monitoring
-        uses: ./.github/actions/synthetic-monitoring
+        uses: ./
         with:
           test_url: 'http://example.com'
           prometheus_pushgateway: 'http://localhost:9091'
