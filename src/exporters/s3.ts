@@ -1,4 +1,6 @@
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
+import https from 'https';
 import archiver from 'archiver';
 import type { MonitoringReport } from '../types';
 import type { TestInfo } from '@playwright/test';
@@ -32,14 +34,13 @@ export class S3Exporter {
       // Custom S3-compatible service configuration
       clientConfig.endpoint = endpoint;
       clientConfig.forcePathStyle = forcePathStyle;
-      if (!tlsVerify) {
-        clientConfig.tls = false;
-      }
-    } else {
-      // Let AWS SDK handle endpoints automatically
-      clientConfig.useAccelerateEndpoint = false;
-      clientConfig.useDualstackEndpoint = false;
-      clientConfig.useFipsEndpoint = false;
+      
+      const agent = new https.Agent({
+        rejectUnauthorized: tlsVerify,
+      });
+      clientConfig.requestHandler = new NodeHttpHandler({
+        httpsAgent: agent,
+      });
     }
 
     console.log('S3 Client Config:', {
