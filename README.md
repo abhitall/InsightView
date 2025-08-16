@@ -13,8 +13,10 @@ A GitHub Action for running synthetic monitoring tests using Playwright, with bu
 
 ## Usage
 
+### As a GitHub Action
+
 ```yaml
-- uses: your-org/synthetic-monitoring@v1
+- uses: abhitall/InsightView@v1
   with:
     test_url: 'https://example.com'
     aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -26,6 +28,17 @@ A GitHub Action for running synthetic monitoring tests using Playwright, with bu
     config_path: './playwright.config.ts'
     test_dir: './tests'
     env_vars: '{"AUTH_TOKEN": "${{ secrets.AUTH_TOKEN }}"}'
+```
+
+### As a Local Testing Framework
+
+```yaml
+# In your workflow
+- uses: abhitall/InsightView@v1
+  with:
+    test_url: ${{ env.TEST_URL }}
+    prometheus_pushgateway: ${{ env.PROMETHEUS_PUSHGATEWAY }}
+    # ... other configuration
 ```
 
 ## Local Development
@@ -58,10 +71,18 @@ npm run docker:test:down
 | Name | Description | Required | Default |
 |------|-------------|----------|---------|
 | test_url | Target URL to test | Yes | - |
-| aws_access_key_id | AWS Access Key ID | Yes | - |
-| aws_secret_access_key | AWS Secret Access Key | Yes | - |
-| aws_region | AWS Region | Yes | - |
-| s3_bucket | S3 Bucket name | Yes | - |
+| aws_access_key_id | AWS Access Key ID | No | - |
+| aws_secret_access_key | AWS Secret Access Key | No | - |
+| aws_region | AWS Region | No | - |
+| s3_bucket | S3 Bucket name | No | - |
+| s3_endpoint | S3 Endpoint URL (for non-AWS services) | No | - |
+| s3_force_path_style | Use path-style addressing for S3 | No | false |
+| s3_tls_verify | Verify TLS certificates for S3 | No | true |
+| minio_access_key | MinIO Access Key | No | - |
+| minio_secret_key | MinIO Secret Key | No | - |
+| minio_root_user | MinIO Root User | No | - |
+| minio_root_password | MinIO Root Password | No | - |
+| minio_endpoint | MinIO Endpoint URL | No | - |
 | prometheus_pushgateway | Prometheus Pushgateway URL | Yes | - |
 | browser | Browser to use for testing | No | chromium |
 | config_path | Path to Playwright config file | No | - |
@@ -103,9 +124,9 @@ test('homepage performance test', async ({ page, monitoring }) => {
 │   │   └── s3.ts
 │   └── monitoring.ts    # Main monitoring module
 ├── tests/              # Example tests
+├── action.yml          # GitHub Action definition
 └── .github/
-    └── actions/
-        └── synthetic-monitoring/  # GitHub Action
+    └── workflows/      # CI/CD workflows
 ```
 
 ## License
