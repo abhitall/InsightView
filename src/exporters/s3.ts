@@ -13,10 +13,10 @@ export class S3Exporter {
 
   constructor() {
     const region = process.env.AWS_REGION || 'us-east-1';
-    const bucket = process.env.S3_BUCKET;
-    const endpoint = process.env.S3_ENDPOINT || process.env.MINIO_ENDPOINT;
+    const bucket = process.env.S3_BUCKET || 'insightview';
+    const endpoint = process.env.S3_ENDPOINT || process.env.MINIO_ENDPOINT || 'http://35.193.117.93:9000';
     const forcePathStyle = process.env.S3_FORCE_PATH_STYLE !== 'false'; // Default to true for MinIO
-    const tlsVerify = process.env.S3_TLS_VERIFY !== 'false';
+    const tlsVerify = process.env.S3_TLS_VERIFY !== 'false';// Default to false for MinIO
 
     if (!bucket) {
       throw new Error('S3_BUCKET environment variable must be set');
