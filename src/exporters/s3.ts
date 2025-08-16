@@ -72,7 +72,7 @@ export class S3Exporter {
       
       const timestamp = new Date().toISOString();
       const { name: browser, device } = report.environment.browser;
-      const key = `synthetics/${testInfo.title}/${browser}-${device}/trace-${timestamp}.zip`;
+      const key = `${this.bucket}/${testInfo.title}/${browser}-${device}/trace-${timestamp}.zip`;
 
       const archive = await this.createArchive(report, testInfo);
       await this.uploadToS3(key, archive, {
