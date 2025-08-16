@@ -1,9 +1,10 @@
 import { test as base, type Page, type TestInfo } from '@playwright/test';
 import { collectWebVitals } from './collectors/webVitals';
 import { collectTestMetrics } from './collectors/testMetrics';
+import { collectLighthouseReport } from './collectors/lightHouse';
 import { PrometheusExporter } from './exporters/prometheus';
 import { S3Exporter } from './exporters/s3';
-import type { WebVitalsData, TestMetrics, MonitoringReport } from './types';
+import type { WebVitalsData, TestMetrics, MonitoringReport, LighthouseReport } from './types';
 
 // Extend the base test with our monitoring fixture
 export const test = base.extend<{
@@ -14,9 +15,11 @@ export const test = base.extend<{
     const collectedMetrics: {
       webVitals: WebVitalsData[];
       testMetrics: TestMetrics | null;
+      lighthouseReports: LighthouseReport[];
     } = {
       webVitals: [],
-      testMetrics: null
+      testMetrics: null,
+      lighthouseReports: [],
     };
 
     // Create the monitoring function that collects metrics
@@ -44,6 +47,16 @@ export const test = base.extend<{
         };
         
         collectedMetrics.webVitals.push(enrichedWebVitals);
+
+        // Collect Lighthouse report
+        const lighthouseReportHtml = await collectLighthouseReport(page);
+        if (lighthouseReportHtml) {
+          collectedMetrics.lighthouseReports.push({
+            html: lighthouseReportHtml,
+            url: page.url(),
+            timestamp: Date.now(),
+          });
+        }
 
         // Collect test metrics for each page
         const testMetrics = await collectTestMetrics(page, testInfo, startTime);
@@ -79,6 +92,7 @@ export const test = base.extend<{
         // Combine all metrics into a single report
         const report: MonitoringReport = {
           webVitals: collectedMetrics.webVitals,
+          lighthouseReports: collectedMetrics.lighthouseReports,
           testMetrics: collectedMetrics.testMetrics ?? { 
             duration: Date.now() - startTime,
             status: 'failed' as const,

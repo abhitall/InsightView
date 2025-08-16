@@ -136,6 +136,14 @@ export class S3Exporter {
     // Add report.json
     archive.append(JSON.stringify(report, null, 2), { name: 'report.json' });
 
+    // Add lighthouse reports if they exist
+    if (report.lighthouseReports) {
+      for (let i = 0; i < report.lighthouseReports.length; i++) {
+        const lighthouseReport = report.lighthouseReports[i];
+        archive.append(lighthouseReport.html, { name: `lighthouse-report-${i}.html` });
+      }
+    }
+
     // Add test output file if it exists and is not empty
     if (typeof testInfo.outputPath === 'function') {
       const outputPath = testInfo.outputPath('test-output.txt');

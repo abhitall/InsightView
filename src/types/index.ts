@@ -116,9 +116,16 @@ export interface ViewportInfo {
   height: number;
 }
 
+export interface LighthouseReport {
+  html: string;
+  url: string;
+  timestamp: number;
+}
+
 export interface MonitoringReport {
   webVitals: WebVitalsData[];
   testMetrics: TestMetrics;
+  lighthouseReports?: LighthouseReport[];
   timestamp: number;
   environment: {
     userAgent: string;
