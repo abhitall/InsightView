@@ -14,7 +14,7 @@ export class S3Exporter {
   constructor() {
     const region = process.env.AWS_REGION || 'us-east-1';
     const bucket = process.env.S3_BUCKET || 'insightview';
-    const endpoint = process.env.S3_ENDPOINT || process.env.MINIO_ENDPOINT || 'http://35.193.117.93:9000';
+    const endpoint = process.env.S3_ENDPOINT || process.env.MINIO_ENDPOINT || 'http://localhost:9000';
     const forcePathStyle = process.env.S3_FORCE_PATH_STYLE !== 'false'; // Default to true for MinIO
     const tlsVerify = process.env.S3_TLS_VERIFY !== 'false';// Default to false for MinIO
 
@@ -72,7 +72,7 @@ export class S3Exporter {
       
       const timestamp = new Date().toISOString();
       const { name: browser, device } = report.environment.browser;
-      const key = `${this.bucket}/${testInfo.title}/${browser}-${device}/trace-${timestamp}.zip`;
+      const key = `synthetic-monitoring/${testInfo.title}/${browser}-${device}/trace-${timestamp}.zip`;
 
       const archive = await this.createArchive(report, testInfo);
       await this.uploadToS3(key, archive, {
