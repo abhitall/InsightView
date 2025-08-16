@@ -80,12 +80,32 @@ export const test = base.extend<{
         const report: MonitoringReport = {
           webVitals: collectedMetrics.webVitals,
           testMetrics: collectedMetrics.testMetrics ?? { 
-            metrics: [], 
+            duration: Date.now() - startTime,
+            status: 'failed' as const,
+            name: testInfo.title,
+            retries: 0,
+            steps: [],
+            resourceStats: {
+              totalRequests: 0,
+              failedRequests: 0,
+              totalBytes: 0,
+              loadTime: 0
+            },
+            navigationStats: {
+              domContentLoaded: 0,
+              load: 0,
+              firstPaint: 0
+            },
+            assertions: {
+              total: 0,
+              passed: 0,
+              failed: 0
+            },
             labels: { 
-              testId: "unknown", 
-              testTitle: "unknown", 
-              timestamp: 0, 
-              url: "" 
+              testId: testInfo.testId || "unknown", 
+              testTitle: testInfo.title || "unknown", 
+              timestamp: Date.now(), 
+              url: page.url() || "" 
             } 
           },
           timestamp: Date.now(),
@@ -110,13 +130,25 @@ export const test = base.extend<{
         }
 
         // Send to S3 if configured
-        if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+        const hasS3Endpoint = process.env.S3_ENDPOINT || process.env.MINIO_ENDPOINT;
+        const hasS3Bucket = process.env.S3_BUCKET;
+        const hasCredentials = (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) ||
+                             (process.env.MINIO_ACCESS_KEY && process.env.MINIO_SECRET_KEY) ||
+                             (process.env.MINIO_ROOT_USER && process.env.MINIO_ROOT_PASSWORD);
+        
+        if (hasS3Endpoint && hasS3Bucket) {
           try {
             const s3Exporter = new S3Exporter();
             await s3Exporter.export(report, testInfo);
           } catch (error) {
             console.error('Failed to send metrics to S3:', error);
           }
+        } else {
+          console.log('S3 export disabled - missing required environment variables:', {
+            hasEndpoint: !!hasS3Endpoint,
+            hasBucket: !!hasS3Bucket,
+            hasCredentials: !!hasCredentials
+          });
         }
       } catch (error) {
         console.error('Error sending collected metrics:', error);

@@ -10,16 +10,16 @@ inputs:
     required: true
   aws_access_key_id:
     description: 'AWS/S3 Access Key ID'
-    required: true
+    required: false
   aws_secret_access_key:
     description: 'AWS/S3 Secret Access Key'
-    required: true
+    required: false
   aws_region:
     description: 'AWS/S3 Region. For AWS S3 buckets, this must match your bucket region (e.g., us-east-2)'
-    required: true
+    required: false
   s3_bucket:
     description: 'S3 Bucket name'
-    required: true
+    required: false
   s3_endpoint:
     description: 'S3 Endpoint URL (Do NOT set this for AWS S3 buckets. Only use for non-AWS S3-compatible services)'
     required: false
@@ -31,6 +31,21 @@ inputs:
     description: 'Verify TLS certificates for S3 (Do NOT set this for AWS S3 buckets. Only use for non-AWS S3-compatible services)'
     required: false
     default: 'true'
+  minio_access_key:
+    description: 'MinIO Access Key'
+    required: false
+  minio_secret_key:
+    description: 'MinIO Secret Key'
+    required: false
+  minio_root_user:
+    description: 'MinIO Root User'
+    required: false
+  minio_root_password:
+    description: 'MinIO Root Password'
+    required: false
+  minio_endpoint:
+    description: 'MinIO Endpoint URL'
+    required: false
   prometheus_pushgateway:
     description: 'Prometheus Pushgateway URL'
     required: true
@@ -82,28 +97,60 @@ runs:
     - name: Setup environment
       shell: bash
       run: |
-        # Infrastructure secrets
+        # Start with base configuration
         cat << EOF > .env
+        PROMETHEUS_PUSHGATEWAY=${{ inputs.prometheus_pushgateway }}
+        TEST_URL=${{ inputs.test_url }}
+        EOF
+
+        # Configure S3/MinIO if any S3 configuration is provided
+        if [ ! -z "${{ inputs.s3_bucket }}" ] || [ ! -z "${{ inputs.aws_access_key_id }}" ] || [ ! -z "${{ inputs.minio_access_key }}" ] || [ ! -z "${{ inputs.minio_root_user }}" ]; then
+          # AWS S3 Configuration (if provided)
+          if [ ! -z "${{ inputs.aws_access_key_id }}" ]; then
+            cat << EOF >> .env
         AWS_ACCESS_KEY_ID=${{ inputs.aws_access_key_id }}
         AWS_SECRET_ACCESS_KEY=${{ inputs.aws_secret_access_key }}
         AWS_REGION=${{ inputs.aws_region }}
+        EOF
+          fi
+
+          # MinIO Configuration (if provided)
+          if [ ! -z "${{ inputs.minio_access_key }}" ]; then
+            cat << EOF >> .env
+        MINIO_ACCESS_KEY=${{ inputs.minio_access_key }}
+        MINIO_SECRET_KEY=${{ inputs.minio_secret_key }}
+        EOF
+          fi
+
+          if [ ! -z "${{ inputs.minio_root_user }}" ]; then
+            cat << EOF >> .env
+        MINIO_ROOT_USER=${{ inputs.minio_root_user }}
+        MINIO_ROOT_PASSWORD=${{ inputs.minio_root_password }}
+        EOF
+          fi
+
+          if [ ! -z "${{ inputs.minio_endpoint }}" ]; then
+            cat << EOF >> .env
+        MINIO_ENDPOINT=${{ inputs.minio_endpoint }}
+        EOF
+          fi
+
+          # S3 Bucket and endpoint configuration
+          if [ ! -z "${{ inputs.s3_bucket }}" ]; then
+            cat << EOF >> .env
         S3_BUCKET=${{ inputs.s3_bucket }}
         EOF
+          fi
 
-        # Only add S3 endpoint configuration for non-AWS S3 services
-        if [ ! -z "${{ inputs.s3_endpoint }}" ]; then
-          cat << EOF >> .env
+          # Only add S3 endpoint configuration for non-AWS S3 services
+          if [ ! -z "${{ inputs.s3_endpoint }}" ]; then
+            cat << EOF >> .env
         S3_ENDPOINT=${{ inputs.s3_endpoint }}
         S3_FORCE_PATH_STYLE=${{ inputs.s3_force_path_style }}
         S3_TLS_VERIFY=${{ inputs.s3_tls_verify }}
         EOF
+          fi
         fi
-
-        # Add remaining configuration
-        cat << EOF >> .env
-        PROMETHEUS_PUSHGATEWAY=${{ inputs.prometheus_pushgateway }}
-        TEST_URL=${{ inputs.test_url }}
-        EOF
 
         # Add custom environment variables if provided
         if [ ! -z "${{ inputs.env_vars }}" ]; then
