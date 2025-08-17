@@ -75,13 +75,20 @@ runs:
         node-version: '20'
         cache: 'npm'
 
-    - name: Install system dependencies
+    - name: Install system dependencies and Chrome
       shell: bash
       run: |
         if command -v apt-get >/dev/null; then
-          apt-get update && apt-get install -y jq
+          apt-get update && apt-get install -y jq wget gnupg
+          # Install Google Chrome for Lighthouse
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add -
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
+          apt-get update && apt-get install -y google-chrome-stable
+          # Set Chrome path for Lighthouse
+          echo "CHROME_PATH=/usr/bin/google-chrome" >> $GITHUB_ENV
         elif command -v apk >/dev/null; then
-          apk add --no-cache jq
+          apk add --no-cache jq chromium
+          echo "CHROME_PATH=/usr/bin/chromium-browser" >> $GITHUB_ENV
         else
           echo "Package manager not found, attempting to continue..."
         fi
@@ -96,35 +103,19 @@ runs:
     - name: Install Playwright
       shell: bash
       run: |
-        npx playwright install --with-deps ${{ inputs.browser }}
-        
-        # Find Chrome for Lighthouse - try multiple locations
-        CHROME_PATHS=(
-          "/usr/bin/google-chrome"
-          "/usr/bin/google-chrome-stable"
-          "/usr/bin/chromium"
-          "/usr/bin/chromium-browser"
-          "$(find /ms-playwright -name chrome -type f 2>/dev/null | head -1)"
-          "$(find /home -name chrome -type f 2>/dev/null | head -1)"
-          "$(which google-chrome 2>/dev/null)"
-          "$(which chromium 2>/dev/null)"
-        )
-        
-        CHROME_FOUND=""
-        for chrome_path in "${CHROME_PATHS[@]}"; do
-          if [ -n "$chrome_path" ] && [ -f "$chrome_path" ] && [ -x "$chrome_path" ]; then
-            CHROME_FOUND="$chrome_path"
-            echo "Found Chrome at: $chrome_path"
-            break
+        # Install Playwright without browsers since we're using system Chrome
+        npx playwright install-deps
+        # Only install Playwright's chromium if system Chrome is not available
+        if [ -z "$CHROME_PATH" ] || [ ! -f "$CHROME_PATH" ]; then
+          echo "System Chrome not found, installing Playwright chromium"
+          npx playwright install chromium
+          # Try to find Playwright's chromium path
+          PLAYWRIGHT_CHROME=$(find /ms-playwright -name "chrome" -type f 2>/dev/null | head -1)
+          if [ -n "$PLAYWRIGHT_CHROME" ]; then
+            echo "CHROME_PATH=$PLAYWRIGHT_CHROME" >> $GITHUB_ENV
           fi
-        done
-        
-        if [ -n "$CHROME_FOUND" ]; then
-          echo "CHROME_PATH=$CHROME_FOUND" >> $GITHUB_ENV
-          echo "Chrome path set to: $CHROME_FOUND"
         else
-          echo "No Chrome found, Lighthouse reports will be skipped"
-          echo "LIGHTHOUSE_DISABLED=true" >> $GITHUB_ENV
+          echo "Using system Chrome at: $CHROME_PATH"
         fi
 
     - name: Setup environment
