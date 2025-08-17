@@ -16,6 +16,9 @@ dist-ssr
 test-results/
 playwright-report/
 
+# TypeScript build info
+tsconfig.tsbuildinfo
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
