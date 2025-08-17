@@ -1,10 +1,11 @@
 import type { Page } from '@playwright/test';
+import * as fs from 'fs';
 
 export async function collectLighthouseReport(page: Page): Promise<string | null> {
   try {
     // Check if Lighthouse is disabled
     if (process.env.LIGHTHOUSE_DISABLED === 'true') {
-      console.log('Lighthouse is disabled (Chrome not found)');
+      console.log('Lighthouse is disabled');
       return null;
     }
 
@@ -18,16 +19,17 @@ export async function collectLighthouseReport(page: Page): Promise<string | null
 
     console.log(`Running Lighthouse on URL: ${url}`);
 
-    // Use eval to prevent TypeScript from checking these imports at compile time
+    // Use dynamic imports for ESM packages
     let lighthouse: any;
     let chromeLauncher: any;
     
     try {
-      const lighthouseModule = await eval('import("lighthouse")');
+      const lighthouseModule = await import('lighthouse');
       lighthouse = lighthouseModule.default;
-      chromeLauncher = await eval('import("chrome-launcher")');
+      chromeLauncher = await import('chrome-launcher');
+      console.log('Lighthouse dependencies loaded successfully');
     } catch (importError) {
-      console.log('Lighthouse dependencies not available, skipping Lighthouse report');
+      console.log('Lighthouse dependencies not available, skipping Lighthouse report:', importError.message);
       return null;
     }
 
@@ -62,7 +64,6 @@ export async function collectLighthouseReport(page: Page): Promise<string | null
       for (const path of possiblePaths) {
         try {
           // Simple check if file exists and is executable
-          const fs = await eval('import("fs")');
           await fs.promises.access(path, fs.constants.F_OK | fs.constants.X_OK);
           launchOptions.chromePath = path;
           console.log(`Found Chrome at: ${path}`);
