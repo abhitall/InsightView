@@ -2,6 +2,12 @@ import type { Page } from '@playwright/test';
 
 export async function collectLighthouseReport(page: Page): Promise<string | null> {
   try {
+    // Check if Lighthouse is disabled
+    if (process.env.LIGHTHOUSE_DISABLED === 'true') {
+      console.log('Lighthouse is disabled (Chrome not found)');
+      return null;
+    }
+
     // Get the current page URL
     const url = page.url();
     
@@ -25,8 +31,8 @@ export async function collectLighthouseReport(page: Page): Promise<string | null
       return null;
     }
 
-    // Try to use chrome-launcher's default Chrome finding logic
-    const chrome = await chromeLauncher.launch({
+    // Prepare Chrome launch options
+    let launchOptions: any = {
       chromeFlags: [
         '--headless=new',
         '--no-sandbox', 
@@ -38,7 +44,17 @@ export async function collectLighthouseReport(page: Page): Promise<string | null
         '--disable-web-security',
         '--allow-running-insecure-content',
       ],
-    });
+    };
+
+    // Use CHROME_PATH if available
+    if (process.env.CHROME_PATH) {
+      launchOptions.chromePath = process.env.CHROME_PATH;
+      console.log(`Using Chrome from CHROME_PATH: ${process.env.CHROME_PATH}`);
+    }
+
+    // Try to launch Chrome
+    const chrome = await chromeLauncher.launch(launchOptions);
+    console.log(`Chrome launched successfully on port ${chrome.port}`);
 
     const options = {
       port: chrome.port,

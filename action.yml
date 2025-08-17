@@ -97,17 +97,34 @@ runs:
       shell: bash
       run: |
         npx playwright install --with-deps ${{ inputs.browser }}
-        # Try to set CHROME_PATH for Lighthouse
-        if command -v google-chrome >/dev/null 2>&1; then
-          echo "CHROME_PATH=$(which google-chrome)" >> $GITHUB_ENV
-        elif command -v google-chrome-stable >/dev/null 2>&1; then
-          echo "CHROME_PATH=$(which google-chrome-stable)" >> $GITHUB_ENV
-        elif command -v chromium >/dev/null 2>&1; then
-          echo "CHROME_PATH=$(which chromium)" >> $GITHUB_ENV
-        elif command -v chromium-browser >/dev/null 2>&1; then
-          echo "CHROME_PATH=$(which chromium-browser)" >> $GITHUB_ENV
+        
+        # Find Chrome for Lighthouse - try multiple locations
+        CHROME_PATHS=(
+          "/usr/bin/google-chrome"
+          "/usr/bin/google-chrome-stable"
+          "/usr/bin/chromium"
+          "/usr/bin/chromium-browser"
+          "$(find /ms-playwright -name chrome -type f 2>/dev/null | head -1)"
+          "$(find /home -name chrome -type f 2>/dev/null | head -1)"
+          "$(which google-chrome 2>/dev/null)"
+          "$(which chromium 2>/dev/null)"
+        )
+        
+        CHROME_FOUND=""
+        for chrome_path in "${CHROME_PATHS[@]}"; do
+          if [ -n "$chrome_path" ] && [ -f "$chrome_path" ] && [ -x "$chrome_path" ]; then
+            CHROME_FOUND="$chrome_path"
+            echo "Found Chrome at: $chrome_path"
+            break
+          fi
+        done
+        
+        if [ -n "$CHROME_FOUND" ]; then
+          echo "CHROME_PATH=$CHROME_FOUND" >> $GITHUB_ENV
+          echo "Chrome path set to: $CHROME_FOUND"
         else
           echo "No Chrome found, Lighthouse reports will be skipped"
+          echo "LIGHTHOUSE_DISABLED=true" >> $GITHUB_ENV
         fi
 
     - name: Setup environment
