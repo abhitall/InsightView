@@ -103,19 +103,39 @@ runs:
     - name: Install Playwright
       shell: bash
       run: |
-        # Install Playwright without browsers since we're using system Chrome
+        # Install Playwright dependencies first
         npx playwright install-deps
-        # Only install Playwright's chromium if system Chrome is not available
-        if [ -z "$CHROME_PATH" ] || [ ! -f "$CHROME_PATH" ]; then
-          echo "System Chrome not found, installing Playwright chromium"
-          npx playwright install chromium
-          # Try to find Playwright's chromium path
-          PLAYWRIGHT_CHROME=$(find /ms-playwright -name "chrome" -type f 2>/dev/null | head -1)
+        
+        # Install full chromium browser (not headless shell) for both Playwright and Lighthouse
+        # Force download of full chromium by setting environment variable
+        export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0
+        npx playwright install chromium
+        
+        # Verify Playwright installation
+        echo "Playwright browsers installed:"
+        npx playwright --version
+        ls -la /ms-playwright/ || echo "Playwright directory not found"
+        
+        # Set Chrome path for Lighthouse - prioritize system Chrome
+        if [ -f "/usr/bin/google-chrome-stable" ]; then
+          echo "CHROME_PATH=/usr/bin/google-chrome-stable" >> $GITHUB_ENV
+          echo "Using system Chrome: /usr/bin/google-chrome-stable"
+        elif [ -f "/usr/bin/google-chrome" ]; then
+          echo "CHROME_PATH=/usr/bin/google-chrome" >> $GITHUB_ENV
+          echo "Using system Chrome: /usr/bin/google-chrome"
+        else
+          # Find Playwright's chromium installation (avoid headless_shell)
+          echo "Looking for Playwright Chrome installations:"
+          find /ms-playwright -name "*chrome*" -type f 2>/dev/null || echo "No chrome files found"
+          
+          PLAYWRIGHT_CHROME=$(find /ms-playwright -path "*/chrome-linux/chrome" -type f -executable 2>/dev/null | head -1)
           if [ -n "$PLAYWRIGHT_CHROME" ]; then
             echo "CHROME_PATH=$PLAYWRIGHT_CHROME" >> $GITHUB_ENV
+            echo "Using Playwright Chrome: $PLAYWRIGHT_CHROME"
+          else
+            echo "Warning: No suitable Chrome executable found for Lighthouse"
+            echo "LIGHTHOUSE_DISABLED=true" >> $GITHUB_ENV
           fi
-        else
-          echo "Using system Chrome at: $CHROME_PATH"
         fi
 
     - name: Setup environment

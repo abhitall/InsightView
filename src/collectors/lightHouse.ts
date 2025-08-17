@@ -50,6 +50,32 @@ export async function collectLighthouseReport(page: Page): Promise<string | null
     if (process.env.CHROME_PATH) {
       launchOptions.chromePath = process.env.CHROME_PATH;
       console.log(`Using Chrome from CHROME_PATH: ${process.env.CHROME_PATH}`);
+    } else {
+      // Try to find a Chrome executable
+      const possiblePaths = [
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/google-chrome',
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+      ];
+      
+      for (const path of possiblePaths) {
+        try {
+          // Simple check if file exists and is executable
+          const fs = await eval('import("fs")');
+          await fs.promises.access(path, fs.constants.F_OK | fs.constants.X_OK);
+          launchOptions.chromePath = path;
+          console.log(`Found Chrome at: ${path}`);
+          break;
+        } catch (err) {
+          // File doesn't exist or isn't executable, try next
+          continue;
+        }
+      }
+      
+      if (!launchOptions.chromePath) {
+        console.warn('No Chrome executable found, using chrome-launcher default');
+      }
     }
 
     // Try to launch Chrome
