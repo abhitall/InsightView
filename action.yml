@@ -75,13 +75,19 @@ runs:
         node-version: '20'
         cache: 'npm'
 
-    - name: Install system dependencies
+    - name: Install system dependencies and Chrome
       shell: bash
       run: |
         if command -v apt-get >/dev/null; then
-          apt-get update && apt-get install -y jq
+          apt-get update && apt-get install -y jq wget gnupg
+          # Install Google Chrome for Lighthouse
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/googlechrome-linux-keyring.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/googlechrome-linux-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google.list
+          apt-get update && apt-get install -y google-chrome-stable
+          echo "CHROME_PATH=/usr/bin/google-chrome" >> $GITHUB_ENV
         elif command -v apk >/dev/null; then
-          apk add --no-cache jq
+          apk add --no-cache jq chromium
+          echo "CHROME_PATH=/usr/bin/chromium-browser" >> $GITHUB_ENV
         else
           echo "Package manager not found, attempting to continue..."
         fi
