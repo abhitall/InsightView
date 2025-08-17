@@ -88,11 +88,27 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: npm ci
+      run: |
+        npm ci
+        # Install optional Lighthouse dependencies
+        npm install lighthouse chrome-launcher --no-save || echo "Failed to install Lighthouse, continuing without it"
 
     - name: Install Playwright
       shell: bash
-      run: npx playwright install --with-deps ${{ inputs.browser }}
+      run: |
+        npx playwright install --with-deps ${{ inputs.browser }}
+        # Try to set CHROME_PATH for Lighthouse
+        if command -v google-chrome >/dev/null 2>&1; then
+          echo "CHROME_PATH=$(which google-chrome)" >> $GITHUB_ENV
+        elif command -v google-chrome-stable >/dev/null 2>&1; then
+          echo "CHROME_PATH=$(which google-chrome-stable)" >> $GITHUB_ENV
+        elif command -v chromium >/dev/null 2>&1; then
+          echo "CHROME_PATH=$(which chromium)" >> $GITHUB_ENV
+        elif command -v chromium-browser >/dev/null 2>&1; then
+          echo "CHROME_PATH=$(which chromium-browser)" >> $GITHUB_ENV
+        else
+          echo "No Chrome found, Lighthouse reports will be skipped"
+        fi
 
     - name: Setup environment
       shell: bash
