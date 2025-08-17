@@ -137,11 +137,15 @@ export class S3Exporter {
     archive.append(JSON.stringify(report, null, 2), { name: 'report.json' });
 
     // Add lighthouse reports if they exist
-    if (report.lighthouseReports) {
+    if (report.lighthouseReports && report.lighthouseReports.length > 0) {
+      console.log(`Adding ${report.lighthouseReports.length} lighthouse report(s) to archive`);
       for (let i = 0; i < report.lighthouseReports.length; i++) {
         const lighthouseReport = report.lighthouseReports[i];
         archive.append(lighthouseReport.html, { name: `lighthouse-report-${i}.html` });
+        console.log(`Added lighthouse report ${i} for URL: ${lighthouseReport.url}`);
       }
+    } else {
+      console.log('No lighthouse reports found to add to archive');
     }
 
     // Add test output file if it exists and is not empty

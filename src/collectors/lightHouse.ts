@@ -24,12 +24,15 @@ export async function collectLighthouseReport(page: Page): Promise<string | null
     let chromeLauncher: any;
     
     try {
-      const lighthouseModule = await import('lighthouse');
+      // Import lighthouse from the correct path
+      const lighthouseModule = await import('lighthouse/core/index.js');
       lighthouse = lighthouseModule.default;
-      chromeLauncher = await import('chrome-launcher');
+      
+      // Import chrome-launcher from the correct path  
+      chromeLauncher = await import('chrome-launcher/dist/index.js');
       console.log('Lighthouse dependencies loaded successfully');
-    } catch (importError) {
-      console.log('Lighthouse dependencies not available, skipping Lighthouse report:', importError.message);
+    } catch (importError: any) {
+      console.log('Lighthouse dependencies not available, skipping Lighthouse report:', importError?.message || importError);
       return null;
     }
 
