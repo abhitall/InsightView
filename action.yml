@@ -98,7 +98,8 @@ runs:
 
     - name: Install Playwright
       shell: bash
-      run: npx playwright install --with-deps ${{ inputs.browser }}
+      # run: npx playwright install --with-deps ${{ inputs.browser }}
+      run: npx playwright install --with-deps
 
     - name: Setup environment
       shell: bash
