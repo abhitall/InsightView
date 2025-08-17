@@ -81,8 +81,8 @@ runs:
         if command -v apt-get >/dev/null; then
           apt-get update && apt-get install -y jq wget gnupg
           # Install Google Chrome for Lighthouse
-          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add -
-          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
           apt-get update && apt-get install -y google-chrome-stable
           # Set Chrome path for Lighthouse
           echo "CHROME_PATH=/usr/bin/google-chrome" >> $GITHUB_ENV
@@ -106,12 +106,11 @@ runs:
         # Install Playwright dependencies first
         npx playwright install-deps
         
-        # Install full chromium browser (not headless shell) for both Playwright and Lighthouse
-        # Force download of full chromium by setting environment variable
-        export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0
-        npx playwright install chromium
+        # Force installation of full chromium browser (not headless shell)
+        # The --force-reinstall ensures we get the full browser even if headless shell exists
+        npx playwright install --force-reinstall chromium
         
-        # Verify Playwright installation
+        # Verify installation - should show chromium, not chromium_headless_shell
         echo "Playwright browsers installed:"
         npx playwright --version
         ls -la /ms-playwright/ || echo "Playwright directory not found"
@@ -128,7 +127,8 @@ runs:
           echo "Looking for Playwright Chrome installations:"
           find /ms-playwright -name "*chrome*" -type f 2>/dev/null || echo "No chrome files found"
           
-          PLAYWRIGHT_CHROME=$(find /ms-playwright -path "*/chrome-linux/chrome" -type f -executable 2>/dev/null | head -1)
+          # Look specifically for the full chromium browser, not headless shell
+          PLAYWRIGHT_CHROME=$(find /ms-playwright -path "*/chromium-*/chrome-linux/chrome" -type f -executable 2>/dev/null | head -1)
           if [ -n "$PLAYWRIGHT_CHROME" ]; then
             echo "CHROME_PATH=$PLAYWRIGHT_CHROME" >> $GITHUB_ENV
             echo "Using Playwright Chrome: $PLAYWRIGHT_CHROME"

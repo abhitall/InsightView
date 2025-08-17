@@ -43,7 +43,7 @@ jobs:
   synthetic-tests:
     runs-on: ubuntu-latest
     container:
-      image: mcr.microsoft.com/playwright:v1.51.0-focal
+      image: mcr.microsoft.com/playwright:v1.51.0-jammy
     
     steps:
       - uses: actions/checkout@v4
