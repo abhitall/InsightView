@@ -5,6 +5,7 @@ import { collectLighthouseReport } from './collectors/lightHouse';
 import { PrometheusExporter } from './exporters/prometheus';
 import { S3Exporter } from './exporters/s3';
 import type { WebVitalsData, TestMetrics, MonitoringReport, LighthouseReport } from './types';
+import path from 'path';
 
 // Extend the base test with our monitoring fixture
 export const test = base.extend<{
@@ -21,6 +22,16 @@ export const test = base.extend<{
       testMetrics: null,
       lighthouseReports: [],
     };
+
+    // Start tracing
+    const context = page.context();
+    try {
+      await context.tracing.start({ screenshots: true, snapshots: true });
+    } catch (e) {
+      if (!e.message.includes('already started')) {
+        throw e;
+      }
+    }
 
     // Create the monitoring function that collects metrics
     const monitoring = async () => {
@@ -78,6 +89,14 @@ export const test = base.extend<{
     // Use the monitoring function
     await use(monitoring);
 
+    // Stop tracing
+    const tracePath = path.join('test-results', `${testInfo.title.replace(/[^a-zA-Z0-9]/g, '_')}-trace.zip`);
+    try {
+      await context.tracing.stop({ path: tracePath });
+    } catch (e) {
+      console.warn('Tracing not started or already stopped:', e.message);
+    }
+
     // After the test completes, send all collected metrics
     if (collectedMetrics.webVitals.length > 0 || collectedMetrics.testMetrics) {
       try {
@@ -123,6 +142,7 @@ export const test = base.extend<{
             } 
           },
           timestamp: Date.now(),
+          tracePath,
           environment: {
             userAgent,
             viewport,

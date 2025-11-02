@@ -127,10 +127,10 @@ export class S3Exporter {
       }
     }
 
-    // Add trace directory if it exists
-    if (testInfo.outputDir && typeof testInfo.outputDir === 'string' && fs.existsSync(testInfo.outputDir)) {
-      archive.directory(testInfo.outputDir, 'trace');
-      console.log('Added trace directory to archive');
+    // Add trace file if it exists
+    if (report.tracePath && fs.existsSync(report.tracePath)) {
+      archive.file(report.tracePath, { name: 'trace.zip' });
+      console.log('Added trace file to archive');
     }
 
     // Add report.json

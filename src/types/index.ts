@@ -127,6 +127,7 @@ export interface MonitoringReport {
   testMetrics: TestMetrics;
   lighthouseReports?: LighthouseReport[];
   timestamp: number;
+  tracePath?: string;
   environment: {
     userAgent: string;
     viewport: {
