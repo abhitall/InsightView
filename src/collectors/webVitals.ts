@@ -52,7 +52,7 @@ export async function collectWebVitals(page: Page): Promise<WebVitalsData> {
       if (!hasWebVitals) {
         console.log('Injecting web-vitals library...');
         await page.addScriptTag({
-          url: 'https://unpkg.com/web-vitals@3/dist/web-vitals.iife.js',
+          url: 'https://unpkg.com/web-vitals@5.1.0/dist/web-vitals.iife.js',
           type: 'text/javascript'
         }).catch(e => {
           console.error('Failed to inject web-vitals library:', e);
