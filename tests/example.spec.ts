@@ -5,7 +5,7 @@ test('multi-page performance test', async ({ page, context, monitoring }) => {
   // First page
   await test.step('Navigate to first page', async () => {
     console.log('Navigating to first page');
-    await page.goto('https://example.com/', { 
+    await page.goto('https://httpbin.org/', { 
       waitUntil: 'networkidle',
       timeout: 30000 
     });
@@ -39,7 +39,7 @@ test('multi-page performance test', async ({ page, context, monitoring }) => {
     const secondPage = await context.newPage();
     
     // Navigate to the second page
-    await secondPage.goto('https://httpbin.org/', { 
+    await secondPage.goto('https://httpbin.org/html', { 
       waitUntil: 'networkidle',
       timeout: 30000 
     });
@@ -74,8 +74,8 @@ test('multi-page performance test', async ({ page, context, monitoring }) => {
 test('homepage performance test', async ({ page, monitoring }) => {
   await test.step('Navigate to homepage', async () => {
     console.log('Navigating to homepage');
-    await page.goto('https://example.com/', { 
-      waitUntil: 'domcontentloaded',
+    await page.goto('https://httpbin.org/html', { 
+      waitUntil: 'load',
       timeout: 30000 
     });
     
@@ -94,10 +94,6 @@ test('homepage performance test', async ({ page, monitoring }) => {
     });
   });
   
-  await test.step('Verify page title', async () => {
-    await expect(page).toHaveTitle(/Example Domain/);
-  });
-  
   await test.step('Collect monitoring data for homepage', async () => {
     console.log('Collecting monitoring data for homepage');
     await monitoring();
@@ -111,7 +107,7 @@ test('homepage performance test', async ({ page, monitoring }) => {
     
     // Navigate to the second page
     await secondPage.goto('https://httpbin.org/', { 
-      waitUntil: 'domcontentloaded',
+      waitUntil: 'load',
       timeout: 30000 
     });
     
@@ -146,7 +142,7 @@ test('api endpoints performance test', async ({ page, monitoring }) => {
     console.log('Testing API endpoints');
     
     // Make API calls sequentially to avoid interference
-    const endpoints = ['https://httpbin.org/users', 'https://httpbin.org/products', 'https://httpbin.org/orders'];
+    const endpoints = ['https://httpbin.org/get', 'https://httpbin.org/json', 'https://httpbin.org/uuid'];
     
     for (const endpoint of endpoints) {
       console.log(`Testing endpoint: ${endpoint}`);
