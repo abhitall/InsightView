@@ -135,10 +135,10 @@ export async function collectLighthouseReport(page: Page): Promise<string | null
         disabled: false,
       },
       // Additional settings for reliability
-      maxWaitForFcp: 15 * 1000,
-      maxWaitForLoad: 35 * 1000,
-      pauseAfterFcpMs: 1000,
-      pauseAfterLoadMs: 1000,
+      maxWaitForFcp: 10 * 1000,
+      maxWaitForLoad: 20 * 1000,
+      pauseAfterFcpMs: 500,
+      pauseAfterLoadMs: 500,
       networkQuietThresholdMs: 1000,
       cpuQuietThresholdMs: 1000,
     };
