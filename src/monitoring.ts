@@ -90,7 +90,7 @@ export const test = base.extend<{
     await use(monitoring);
 
     // Stop tracing
-    const tracePath = path.join('test-results', `${testInfo.title.replace(/[^a-zA-Z0-9]/g, '_')}-trace.zip`);
+    const tracePath = path.join('test-results', `${testInfo.title.replace(/[^a-zA-Z0-9]/g, '_')}-trace-${Date.now()}.zip`);
     try {
       await context.tracing.stop({ path: tracePath });
     } catch (e) {
