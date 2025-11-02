@@ -63,7 +63,7 @@ test('multi-page performance test', async ({ page, context, monitoring }) => {
     await test.step('Collect second page metrics', async () => {
       console.log('Collecting metrics for second page');
       // Use the monitoring fixture with the second page
-      await monitoring();
+      await monitoring(secondPage);
     });
 
     // Close the second page
@@ -133,7 +133,7 @@ test('homepage performance test', async ({ page, monitoring }) => {
     await test.step('Collect monitoring data for second page', async () => {
       console.log('Collecting monitoring data for second page');
       // Use the monitoring fixture with the second page
-      await monitoring();
+      await monitoring(secondPage);
     });
 
     // Close the second page

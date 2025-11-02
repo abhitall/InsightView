@@ -9,7 +9,7 @@ import path from 'path';
 
 // Extend the base test with our monitoring fixture
 export const test = base.extend<{
-  monitoring: () => Promise<void>;
+  monitoring: (page?: Page) => Promise<void>;
 }>({
   monitoring: async ({ page, browserName }, use, testInfo) => {
     const startTime = Date.now();
@@ -34,14 +34,15 @@ export const test = base.extend<{
     }
 
     // Create the monitoring function that collects metrics
-    const monitoring = async () => {
+    const monitoring = async (customPage?: Page) => {
+      const targetPage = customPage || page;
       try {
         // Wait for page to be stable before collecting metrics
-        await page.waitForLoadState('networkidle');
-        await page.waitForTimeout(1000); // Additional wait for metrics to stabilize
+        await targetPage.waitForLoadState('networkidle');
+        await targetPage.waitForTimeout(1000); // Additional wait for metrics to stabilize
         
         // Collect web vitals
-        const webVitals = await collectWebVitals(page);
+        const webVitals = await collectWebVitals(targetPage);
         
         // Add test metadata to web vitals
         const enrichedWebVitals: WebVitalsData = {
@@ -52,7 +53,7 @@ export const test = base.extend<{
               testTitle: testInfo.title,
               pageIndex: collectedMetrics.webVitals.length,
               timestamp: Date.now(),
-              url: page.url()
+              url: targetPage.url()
             }
           }))
         };
@@ -60,24 +61,24 @@ export const test = base.extend<{
         collectedMetrics.webVitals.push(enrichedWebVitals);
 
         // Collect Lighthouse report
-        const lighthouseReportHtml = await collectLighthouseReport(page);
+        const lighthouseReportHtml = await collectLighthouseReport(targetPage);
         if (lighthouseReportHtml) {
           collectedMetrics.lighthouseReports.push({
             html: lighthouseReportHtml,
-            url: page.url(),
+            url: targetPage.url(),
             timestamp: Date.now(),
           });
         }
 
         // Collect test metrics for each page
-        const testMetrics = await collectTestMetrics(page, testInfo, startTime);
+        const testMetrics = await collectTestMetrics(targetPage, testInfo, startTime);
         collectedMetrics.testMetrics = {
           ...testMetrics,
           labels: {
             testId: testInfo.testId,
             testTitle: testInfo.title,
             timestamp: Date.now(),
-            url: page.url()
+            url: targetPage.url()
           }
         };
       } catch (error) {
