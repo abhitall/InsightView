@@ -11,7 +11,7 @@ export default defineConfig({
   outputDir: 'test-results',
   use: {
     baseURL: process.env.TEST_URL,
-    trace: 'on',
+    trace: 'off',
     screenshot: 'on',
     video: 'retain-on-failure',
   },
