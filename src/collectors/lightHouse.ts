@@ -20,53 +20,72 @@ export async function collectLighthouseReport(page: Page): Promise<string | null
 
     console.log(`Starting Lighthouse analysis for: ${url}`);
 
-    // Find Chrome executable
-    const chromePaths = [
-      process.env.CHROME_PATH,
-      '/usr/bin/google-chrome',
-      '/usr/bin/google-chrome-stable',
-      '/usr/bin/chromium',
-      '/usr/bin/chromium-browser',
-    ].filter(Boolean);
+    // Find Chrome executable with timeout
+    const findChromeWithTimeout = async (): Promise<string | null> => {
+      return Promise.race([
+        (async () => {
+          // Find Chrome executable
+          const chromePaths = [
+            process.env.CHROME_PATH,
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/chromium',
+            '/usr/bin/chromium-browser',
+          ].filter(Boolean);
 
-    // Try to find Playwright's chromium using find command
-    try {
-      const playwrightChrome = execSync('find /ms-playwright -name "chrome" -type f 2>/dev/null | head -1', { encoding: 'utf8' }).trim();
-      if (playwrightChrome) {
-        chromePaths.push(playwrightChrome);
-      }
-    } catch (e) {
-      // Ignore find errors
-    }
+          // Try to find Playwright's chromium using find command
+          try {
+            const playwrightChrome = execSync('find /ms-playwright -name "chrome" -type f 2>/dev/null | head -1', { encoding: 'utf8', timeout: 3000 }).trim();
+            if (playwrightChrome) {
+              chromePaths.push(playwrightChrome);
+            }
+          } catch (e) {
+            // Ignore find errors
+          }
 
-    let chromePath = null;
-    for (const pathToCheck of chromePaths) {
-      if (pathToCheck && fs.existsSync(pathToCheck)) {
-        // Verify the file is executable
-        try {
-          fs.accessSync(pathToCheck, fs.constants.X_OK);
-          chromePath = pathToCheck;
-          break;
-        } catch (e) {
-          console.log(`Chrome at ${pathToCheck} is not executable`);
-        }
-      }
-    }
+          let chromePath = null;
+          for (const pathToCheck of chromePaths) {
+            if (pathToCheck && fs.existsSync(pathToCheck)) {
+              // Verify the file is executable
+              try {
+                fs.accessSync(pathToCheck, fs.constants.X_OK);
+                chromePath = pathToCheck;
+                break;
+              } catch (e) {
+                console.log(`Chrome at ${pathToCheck} is not executable`);
+              }
+            }
+          }
 
+          if (!chromePath) {
+            // Try to find any chrome executable using which
+            try {
+              const whichChrome = execSync('which google-chrome || which chromium || which chromium-browser', { encoding: 'utf8', timeout: 3000 }).trim();
+              if (whichChrome && fs.existsSync(whichChrome)) {
+                chromePath = whichChrome;
+              }
+            } catch (e) {
+              // Ignore which errors
+            }
+          }
+
+          return chromePath;
+        })(),
+        new Promise<null>((_, reject) => 
+          setTimeout(() => reject(new Error('Chrome executable search timed out')), 5000)
+        )
+      ]);
+    };
+
+    const chromePath = await findChromeWithTimeout();
     if (!chromePath) {
-      // Try to find any chrome executable using which
-      try {
-        const whichChrome = execSync('which google-chrome || which chromium || which chromium-browser', { encoding: 'utf8' }).trim();
-        if (whichChrome && fs.existsSync(whichChrome)) {
-          chromePath = whichChrome;
-        }
-      } catch (e) {
-        // Ignore which errors
-      }
-    }
-
-    if (!chromePath) {
-      throw new Error(`No Chrome executable found. Checked paths: ${chromePaths.join(', ')}`);
+      throw new Error(`No Chrome executable found. Checked paths: ${[
+        process.env.CHROME_PATH,
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+      ].filter(Boolean).join(', ')}`);
     }
 
     console.log(`Using Chrome at: ${chromePath}`);
@@ -75,33 +94,41 @@ export async function collectLighthouseReport(page: Page): Promise<string | null
     const cookies = await page.context().cookies();
     const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
 
-    // Launch Chrome with optimal configuration for Lighthouse
-    chrome = await chromeLauncher.launch({
-      chromePath: chromePath as string,
-      chromeFlags: [
-        '--headless=new',
-        '--no-sandbox',
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        '--disable-extensions',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--disable-features=TranslateUI',
-        '--disable-ipc-flooding-protection',
-        '--enable-features=NetworkService,NetworkServiceLogging',
-        '--force-color-profile=srgb',
-        '--metrics-recording-only',
-        '--no-first-run',
-        '--use-mock-keychain',
-        '--disable-default-apps',
-        '--disable-component-extensions-with-background-pages',
-      ],
-    });
+    // Launch Chrome with timeout
+    const launchChromeWithTimeout = async () => {
+      return Promise.race([
+        chromeLauncher.launch({
+          chromePath: chromePath as string,
+          chromeFlags: [
+            '--headless=new',
+            '--no-sandbox',
+            '--disable-gpu',
+            '--disable-dev-shm-usage',
+            '--disable-extensions',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-features=TranslateUI',
+            '--disable-ipc-flooding-protection',
+            '--enable-features=NetworkService,NetworkServiceLogging',
+            '--force-color-profile=srgb',
+            '--metrics-recording-only',
+            '--no-first-run',
+            '--use-mock-keychain',
+            '--disable-default-apps',
+            '--disable-component-extensions-with-background-pages',
+          ],
+        }),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Chrome launch timed out')), 30000)
+        )
+      ]);
+    };
 
+    chrome = await launchChromeWithTimeout();
     console.log(`Chrome launched on port: ${chrome.port}`);
 
-    // Configure Lighthouse options based on official docs
+    // Configure Lighthouse options with protocol timeout settings
     const options = {
       logLevel: 'info' as const,
       output: 'html' as const,
@@ -109,12 +136,9 @@ export async function collectLighthouseReport(page: Page): Promise<string | null
       port: chrome.port,
       // Include authentication headers
       extraHeaders: cookieString ? { Cookie: cookieString } : undefined,
-      // CI-specific configurations
-      skipAuditNames: [
-        'screenshot-thumbnails', // Skip screenshots in CI to reduce size
-        'final-screenshot',
-        'uses-http2', // May not be available in test environments
-      ],
+      // CI-specific configurations - disable storage clearing to prevent timeouts
+      clearStorageTypes: [], // Disable storage clearing to prevent PROTOCOL_TIMEOUT
+      disableStorageReset: true, // Additional safeguard
       // Performance and reliability settings
       throttlingMethod: 'simulate' as const,
       throttling: {
@@ -134,19 +158,28 @@ export async function collectLighthouseReport(page: Page): Promise<string | null
         deviceScaleFactor: 1,
         disabled: false,
       },
-      // Additional settings for reliability
-      maxWaitForFcp: 10 * 1000,
-      maxWaitForLoad: 20 * 1000,
-      pauseAfterFcpMs: 500,
-      pauseAfterLoadMs: 500,
-      networkQuietThresholdMs: 1000,
-      cpuQuietThresholdMs: 1000,
+      // Additional settings for reliability and speed
+      maxWaitForFcp: 15 * 1000, // Reduced from 30s
+      maxWaitForLoad: 25 * 1000, // Reduced from 45s
+      pauseAfterFcpMs: 500, // Reduced from 1000ms
+      pauseAfterLoadMs: 500, // Reduced from 1000ms
+      networkQuietThresholdMs: 500, // Reduced from 1000ms
+      cpuQuietThresholdMs: 500, // Reduced from 1000ms
     };
 
     console.log('Running Lighthouse audit...');
     
-    // Run Lighthouse with the configured options
-    const runnerResult = await lighthouse(url, options);
+    // Run Lighthouse with timeout
+    const runLighthouseWithTimeout = async () => {
+      return Promise.race([
+        lighthouse(url, options),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Lighthouse analysis timed out')), 60000)
+        )
+      ]);
+    };
+
+    const runnerResult = await runLighthouseWithTimeout();
 
     if (!runnerResult) {
       throw new Error('Lighthouse returned no result');

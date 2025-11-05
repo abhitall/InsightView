@@ -36,55 +36,72 @@ export const test = base.extend<{
     // Create the monitoring function that collects metrics
     const monitoring = async (customPage?: Page) => {
       const targetPage = customPage || page;
-      try {
-        // Wait for page to be stable before collecting metrics
-        await targetPage.waitForLoadState('networkidle');
-        await targetPage.waitForTimeout(1000); // Additional wait for metrics to stabilize
-        
-        // Collect web vitals
-        const webVitals = await collectWebVitals(targetPage);
-        
-        // Add test metadata to web vitals
-        const enrichedWebVitals: WebVitalsData = {
-          metrics: webVitals.metrics.map(metric => ({
-            ...metric,
-            labels: {
-              testId: testInfo.testId,
-              testTitle: testInfo.title,
-              pageIndex: collectedMetrics.webVitals.length,
-              timestamp: Date.now(),
-              url: targetPage.url()
+      
+      // Add timeout protection around the entire monitoring operation
+      const monitoringWithTimeout = async () => {
+        return Promise.race([
+          (async () => {
+            try {
+              // Wait for page to be stable before collecting metrics
+              await targetPage.waitForLoadState('networkidle');
+              await targetPage.waitForTimeout(1000); // Additional wait for metrics to stabilize
+              
+              // Collect web vitals
+              const webVitals = await collectWebVitals(targetPage);
+              
+              // Add test metadata to web vitals
+              const enrichedWebVitals: WebVitalsData = {
+                metrics: webVitals.metrics.map(metric => ({
+                  ...metric,
+                  labels: {
+                    testId: testInfo.testId,
+                    testTitle: testInfo.title,
+                    pageIndex: collectedMetrics.webVitals.length,
+                    timestamp: Date.now(),
+                    url: targetPage.url()
+                  }
+                }))
+              };
+              
+              collectedMetrics.webVitals.push(enrichedWebVitals);
+
+              // Collect Lighthouse report only if not disabled
+              if (!process.env.DISABLE_LIGHTHOUSE) {
+                const lighthouseReportHtml = await collectLighthouseReport(targetPage);
+                if (lighthouseReportHtml) {
+                  collectedMetrics.lighthouseReports.push({
+                    html: lighthouseReportHtml,
+                    url: targetPage.url(),
+                    timestamp: Date.now(),
+                  });
+                }
+              } else {
+                console.log('Lighthouse collection disabled via DISABLE_LIGHTHOUSE environment variable');
+              }
+
+              // Collect test metrics for each page
+              const testMetrics = await collectTestMetrics(targetPage, testInfo, startTime);
+              collectedMetrics.testMetrics = {
+                ...testMetrics,
+                labels: {
+                  testId: testInfo.testId,
+                  testTitle: testInfo.title,
+                  timestamp: Date.now(),
+                  url: targetPage.url()
+                }
+              };
+            } catch (error) {
+              console.error('Error collecting metrics:', error);
+              // Don't throw here to allow the test to continue
             }
-          }))
-        };
-        
-        collectedMetrics.webVitals.push(enrichedWebVitals);
+          })(),
+          new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('Monitoring operation timed out')), 60000)
+          )
+        ]);
+      };
 
-        // Collect Lighthouse report
-        const lighthouseReportHtml = await collectLighthouseReport(targetPage);
-        if (lighthouseReportHtml) {
-          collectedMetrics.lighthouseReports.push({
-            html: lighthouseReportHtml,
-            url: targetPage.url(),
-            timestamp: Date.now(),
-          });
-        }
-
-        // Collect test metrics for each page
-        const testMetrics = await collectTestMetrics(targetPage, testInfo, startTime);
-        collectedMetrics.testMetrics = {
-          ...testMetrics,
-          labels: {
-            testId: testInfo.testId,
-            testTitle: testInfo.title,
-            timestamp: Date.now(),
-            url: targetPage.url()
-          }
-        };
-      } catch (error) {
-        console.error('Error collecting metrics:', error);
-        // Don't throw here to allow the test to continue
-      }
+      await monitoringWithTimeout();
     };
 
     // Use the monitoring function
