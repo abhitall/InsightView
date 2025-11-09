@@ -1,69 +1,130 @@
 import { test as base, type Page, type TestInfo } from '@playwright/test';
 import { collectWebVitals } from './collectors/webVitals';
 import { collectTestMetrics } from './collectors/testMetrics';
+import { collectLighthouseReport } from './collectors/lightHouse';
 import { PrometheusExporter } from './exporters/prometheus';
 import { S3Exporter } from './exporters/s3';
-import type { WebVitalsData, TestMetrics, MonitoringReport } from './types';
+import type { WebVitalsData, TestMetrics, MonitoringReport, LighthouseReport } from './types';
+import path from 'path';
 
 // Extend the base test with our monitoring fixture
 export const test = base.extend<{
-  monitoring: () => Promise<void>;
+  monitoring: (page?: Page) => Promise<void>;
 }>({
   monitoring: async ({ page, browserName }, use, testInfo) => {
     const startTime = Date.now();
     const collectedMetrics: {
       webVitals: WebVitalsData[];
       testMetrics: TestMetrics | null;
+      lighthouseReports: LighthouseReport[];
     } = {
       webVitals: [],
-      testMetrics: null
+      testMetrics: null,
+      lighthouseReports: [],
     };
 
-    // Create the monitoring function that collects metrics
-    const monitoring = async () => {
-      try {
-        // Wait for page to be stable before collecting metrics
-        await page.waitForLoadState('networkidle');
-        await page.waitForTimeout(1000); // Additional wait for metrics to stabilize
-        
-        // Collect web vitals
-        const webVitals = await collectWebVitals(page);
-        
-        // Add test metadata to web vitals
-        const enrichedWebVitals: WebVitalsData = {
-          metrics: webVitals.metrics.map(metric => ({
-            ...metric,
-            labels: {
-              testId: testInfo.testId,
-              testTitle: testInfo.title,
-              pageIndex: collectedMetrics.webVitals.length,
-              timestamp: Date.now(),
-              url: page.url()
-            }
-          }))
-        };
-        
-        collectedMetrics.webVitals.push(enrichedWebVitals);
-
-        // Collect test metrics for each page
-        const testMetrics = await collectTestMetrics(page, testInfo, startTime);
-        collectedMetrics.testMetrics = {
-          ...testMetrics,
-          labels: {
-            testId: testInfo.testId,
-            testTitle: testInfo.title,
-            timestamp: Date.now(),
-            url: page.url()
-          }
-        };
-      } catch (error) {
-        console.error('Error collecting metrics:', error);
-        // Don't throw here to allow the test to continue
+    // Start tracing
+    const context = page.context();
+    try {
+      await context.tracing.start({ screenshots: true, snapshots: true });
+    } catch (e) {
+      if (!e.message.includes('already started')) {
+        throw e;
       }
+    }
+
+    // Create the monitoring function that collects metrics
+    const monitoring = async (customPage?: Page) => {
+      const targetPage = customPage || page;
+      
+      // Add timeout protection around the entire monitoring operation
+      const monitoringWithTimeout = async () => {
+        return Promise.race([
+          (async () => {
+            try {
+              // Wait for page to be ready - use 'load' event which works for both static and dynamic pages
+              // 'networkidle' is DISCOURAGED by Playwright for dynamic web apps as it may never occur
+              await targetPage.waitForLoadState('load').catch(() => {
+                console.log('Load state timeout, continuing with metrics collection');
+              });
+              
+              // Wait for DOM to be fully parsed and initial scripts to execute
+              await targetPage.waitForLoadState('domcontentloaded').catch(() => {
+                console.log('DOMContentLoaded timeout, continuing with metrics collection');
+              });
+              
+              // Give a short grace period for initial dynamic content to render
+              // This is more reliable than networkidle for SPAs
+              await targetPage.waitForTimeout(1500);
+              
+              // Collect web vitals
+              const webVitals = await collectWebVitals(targetPage);
+              
+              // Add test metadata to web vitals
+              const enrichedWebVitals: WebVitalsData = {
+                metrics: webVitals.metrics.map(metric => ({
+                  ...metric,
+                  labels: {
+                    testId: testInfo.testId,
+                    testTitle: testInfo.title,
+                    pageIndex: collectedMetrics.webVitals.length,
+                    timestamp: Date.now(),
+                    url: targetPage.url()
+                  }
+                }))
+              };
+              
+              collectedMetrics.webVitals.push(enrichedWebVitals);
+
+              // Collect Lighthouse report only if not disabled
+              if (!process.env.DISABLE_LIGHTHOUSE) {
+                const lighthouseReportHtml = await collectLighthouseReport(targetPage);
+                if (lighthouseReportHtml) {
+                  collectedMetrics.lighthouseReports.push({
+                    html: lighthouseReportHtml,
+                    url: targetPage.url(),
+                    timestamp: Date.now(),
+                  });
+                }
+              } else {
+                console.log('Lighthouse collection disabled via DISABLE_LIGHTHOUSE environment variable');
+              }
+
+              // Collect test metrics for each page
+              const testMetrics = await collectTestMetrics(targetPage, testInfo, startTime);
+              collectedMetrics.testMetrics = {
+                ...testMetrics,
+                labels: {
+                  testId: testInfo.testId,
+                  testTitle: testInfo.title,
+                  timestamp: Date.now(),
+                  url: targetPage.url()
+                }
+              };
+            } catch (error) {
+              console.error('Error collecting metrics:', error);
+              // Don't throw here to allow the test to continue
+            }
+          })(),
+          new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('Monitoring operation timed out')), 60000)
+          )
+        ]);
+      };
+
+      await monitoringWithTimeout();
     };
 
     // Use the monitoring function
     await use(monitoring);
+
+    // Stop tracing
+    const tracePath = path.join(testInfo.outputDir || 'test-results', 'trace.zip');
+    try {
+      await context.tracing.stop({ path: tracePath });
+    } catch (e) {
+      console.warn('Tracing not started or already stopped:', e.message);
+    }
 
     // After the test completes, send all collected metrics
     if (collectedMetrics.webVitals.length > 0 || collectedMetrics.testMetrics) {
@@ -79,6 +140,7 @@ export const test = base.extend<{
         // Combine all metrics into a single report
         const report: MonitoringReport = {
           webVitals: collectedMetrics.webVitals,
+          lighthouseReports: collectedMetrics.lighthouseReports,
           testMetrics: collectedMetrics.testMetrics ?? { 
             duration: Date.now() - startTime,
             status: 'failed' as const,
@@ -109,6 +171,7 @@ export const test = base.extend<{
             } 
           },
           timestamp: Date.now(),
+          tracePath,
           environment: {
             userAgent,
             viewport,

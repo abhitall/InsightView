@@ -127,14 +127,22 @@ export class S3Exporter {
       }
     }
 
-    // Add trace directory if it exists
-    if (testInfo.outputDir && typeof testInfo.outputDir === 'string' && fs.existsSync(testInfo.outputDir)) {
-      archive.directory(testInfo.outputDir, 'trace');
-      console.log('Added trace directory to archive');
+    // Add trace file if it exists
+    if (report.tracePath && fs.existsSync(report.tracePath)) {
+      archive.file(report.tracePath, { name: 'trace.zip' });
+      console.log('Added trace file to archive');
     }
 
     // Add report.json
     archive.append(JSON.stringify(report, null, 2), { name: 'report.json' });
+
+    // Add lighthouse reports if they exist
+    if (report.lighthouseReports) {
+      for (let i = 0; i < report.lighthouseReports.length; i++) {
+        const lighthouseReport = report.lighthouseReports[i];
+        archive.append(lighthouseReport.html, { name: `lighthouse-report-${i}.html` });
+      }
+    }
 
     // Add test output file if it exists and is not empty
     if (typeof testInfo.outputPath === 'function') {
