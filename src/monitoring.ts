@@ -42,9 +42,20 @@ export const test = base.extend<{
         return Promise.race([
           (async () => {
             try {
-              // Wait for page to be stable before collecting metrics
-              await targetPage.waitForLoadState('networkidle');
-              await targetPage.waitForTimeout(1000); // Additional wait for metrics to stabilize
+              // Wait for page to be ready - use 'load' event which works for both static and dynamic pages
+              // 'networkidle' is DISCOURAGED by Playwright for dynamic web apps as it may never occur
+              await targetPage.waitForLoadState('load').catch(() => {
+                console.log('Load state timeout, continuing with metrics collection');
+              });
+              
+              // Wait for DOM to be fully parsed and initial scripts to execute
+              await targetPage.waitForLoadState('domcontentloaded').catch(() => {
+                console.log('DOMContentLoaded timeout, continuing with metrics collection');
+              });
+              
+              // Give a short grace period for initial dynamic content to render
+              // This is more reliable than networkidle for SPAs
+              await targetPage.waitForTimeout(1500);
               
               // Collect web vitals
               const webVitals = await collectWebVitals(targetPage);
