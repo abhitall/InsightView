@@ -1,0 +1,56 @@
+name: End-to-End
+
+# Brings up the full docker-compose stack and runs the synthetic + RUM
+# end-to-end assertions against it. This is the authoritative proof
+# that the platform works top to bottom.
+
+on:
+  pull_request:
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "infra/**"
+      - "action.yml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.0.0 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Bring up the platform stack
+        run: pnpm e2e:up
+
+      - name: Run end-to-end test
+        run: pnpm e2e:test
+
+      - name: Capture logs on failure
+        if: failure()
+        run: pnpm compose:logs > compose-logs.txt || true
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compose-logs
+          path: compose-logs.txt
+
+      - name: Tear down stack
+        if: always()
+        run: pnpm e2e:down

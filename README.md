@@ -1,134 +1,322 @@
-# Synthetic Monitoring GitHub Action
+# InsightView
 
-A GitHub Action for running synthetic monitoring tests using Playwright, with built-in support for metrics collection and reporting.
+**InsightView is an open-source monitoring platform that unifies synthetic
+monitoring and real-user monitoring, fully scriptable from GitHub Actions.**
 
-## Features
+It grew out of a Playwright-based synthetic monitoring GitHub Action
+(`abhitall/InsightView@v1`) and has evolved into a full platform MVP
+with distributed scheduling, alerting, RUM, and a React dashboard —
+all runnable from a single `docker compose up`.
 
-- Web Vitals metrics collection (CLS, FCP, FID, INP, LCP, TTFB)
-- Prometheus metrics integration
-- S3 trace storage
-- Configurable test paths and browsers
-- Support for custom environment variables
-- Automated scheduling with manual trigger option
+The v1 Action usage is still supported via `command: legacy-run`, so
+existing workflows keep working with zero changes while you migrate to
+the platform at your own pace.
 
-## Usage
+## What you get
 
-### As a GitHub Action
+- **Synthetic monitoring** — containerized Playwright runner that
+  executes checks on your schedule, collects Web Vitals, runs
+  assertions, and captures screenshots to S3/MinIO.
+- **Real-user monitoring** — tree-shakeable browser SDK collects
+  Core Web Vitals, JS errors, and navigation timings via
+  `navigator.sendBeacon`.
+- **Distributed scheduler** — leader-elected, reconciles checks from
+  the database, keeps a dead-man's-switch watchdog so you know when
+  monitoring itself has gone quiet.
+- **Alerting engine** — threshold, consecutive-failures, and composite
+  strategies with Slack / webhook / stdout notification channels.
+- **Monitors-as-code** — check and alert rule definitions live in
+  YAML in your repo, deployed via the GitHub Action.
+- **Dashboard** — React SPA for checks, runs, alerts, and RUM data.
+- **GitHub Action dispatcher** — a single `action.yml` exposes every
+  platform capability: `run | deploy | validate | status | legacy-run`.
+
+## Architecture
+
+```
+┌─ user layer ──────────────────────────────────────────────────────┐
+│ Dashboard (React) │ REST API │ GitHub Action │ monitors-as-code  │
+├─ control plane ───────────────────────────────────────────────────┤
+│ api │ scheduler │ alerting                                       │
+├─ event bus (BullMQ today → Kafka Phase 2) ───────────────────────┤
+│ checks.scheduled │ checks.completed │ alerts.triggered │ rum.*   │
+├─ data plane ──────────────────────────────────────────────────────┤
+│ runner (Playwright) │ rum-collector (Fastify) │ rum-sdk (browser) │
+├─ storage ─────────────────────────────────────────────────────────┤
+│ PostgreSQL │ Redis │ Pushgateway │ MinIO (S3)                    │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the detailed
+HLD + LLD, [`docs/ROADMAP.md`](docs/ROADMAP.md) for the 18-month
+phased plan, [`docs/GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md) for the
+12-item severity matrix, and [`docs/adr/`](docs/adr/) for the
+architectural decisions behind the MVP.
+
+## Quick start — end-to-end in one command
+
+```bash
+pnpm install
+pnpm compose:up        # builds & starts postgres, redis, api, scheduler,
+                       # runner, alerting, rum-collector, dashboard,
+                       # test-site, minio, pushgateway, prometheus
+pnpm e2e:test          # runs the end-to-end assertions
+```
+
+When the stack is up:
+
+| Service        | URL                       |
+|----------------|---------------------------|
+| Dashboard      | http://localhost:5173     |
+| API            | http://localhost:4000     |
+| RUM collector  | http://localhost:4400     |
+| Test site      | http://localhost:8080     |
+| Prometheus     | http://localhost:9090     |
+| Pushgateway    | http://localhost:9091     |
+| MinIO console  | http://localhost:9001     |
+
+Tear down with `pnpm compose:down`.
+
+## GitHub Action usage
+
+### New: trigger a platform run
 
 ```yaml
-- uses: abhitall/InsightView@v1
+- uses: abhitall/InsightView@v2
   with:
+    command: run
+    api_url: ${{ secrets.INSIGHTVIEW_API_URL }}
+    api_token: ${{ secrets.INSIGHTVIEW_API_TOKEN }}
+    check_name: homepage-health
+    wait: "true"
+```
+
+### New: deploy monitors-as-code on merge
+
+```yaml
+on:
+  push:
+    branches: [main]
+    paths: [monitors/**]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: abhitall/InsightView@v2
+        with:
+          command: deploy
+          api_url: ${{ secrets.INSIGHTVIEW_API_URL }}
+          api_token: ${{ secrets.INSIGHTVIEW_API_TOKEN }}
+          monitors_path: monitors
+```
+
+### New: validate monitors on PR
+
+```yaml
+on:
+  pull_request:
+    paths: [monitors/**]
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: abhitall/InsightView@v2
+        with:
+          command: validate
+          monitors_path: monitors
+```
+
+### New: query status from CI
+
+```yaml
+- uses: abhitall/InsightView@v2
+  with:
+    command: status
+    api_url: ${{ secrets.INSIGHTVIEW_API_URL }}
+    check_name: homepage-health
+```
+
+### Backwards compatible: v1 behavior
+
+Existing workflows that run a standalone Playwright test with
+Pushgateway + S3 uploads keep working — just use `command: legacy-run`
+(or omit `command`; it's the default):
+
+```yaml
+- uses: abhitall/InsightView@v2
+  with:
+    command: legacy-run
     test_url: 'https://example.com'
+    prometheus_pushgateway: ${{ secrets.PROMETHEUS_PUSHGATEWAY }}
     aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
     aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
     aws_region: ${{ secrets.AWS_REGION }}
     s3_bucket: ${{ secrets.S3_BUCKET }}
-    prometheus_pushgateway: ${{ secrets.PROMETHEUS_PUSHGATEWAY }}
     browser: 'chromium'
-    config_path: './playwright.config.ts'
-    test_dir: './tests'
-    env_vars: '{"AUTH_TOKEN": "${{ secrets.AUTH_TOKEN }}"}'
 ```
 
-### As a Local Testing Framework
+This runs the original Playwright fixture path preserved under
+`apps/runner/src/legacy/`.
+
+## Monitors-as-code
+
+Check and alert definitions live in YAML:
 
 ```yaml
-# In your workflow
-- uses: abhitall/InsightView@v1
-  with:
-    test_url: ${{ env.TEST_URL }}
-    prometheus_pushgateway: ${{ env.PROMETHEUS_PUSHGATEWAY }}
-    # ... other configuration
+# monitors/test-site-home.yaml
+apiVersion: insightview.io/v1
+kind: Check
+metadata:
+  name: test-site-home
+  description: "Synthetic check against the demo test-site"
+  tags: ["e2e"]
+spec:
+  type: browser
+  schedule: "*/5 * * * *"
+  targetUrl: "https://test-site.example.com"
+  timeoutMs: 45000
+  assertions:
+    - type: status
+      value: passed
+    - type: body-contains
+      value: "Welcome"
+---
+apiVersion: insightview.io/v1
+kind: AlertRule
+metadata:
+  name: test-site-home-fail
+spec:
+  checkName: test-site-home
+  strategy: CONSECUTIVE_FAILURES
+  expression:
+    threshold: 1
+  severity: CRITICAL
+  channels:
+    - stdout
 ```
 
-## Local Development
+## RUM SDK
 
-### Prerequisites
+Drop into any HTML page:
 
-1. Install [nektos/act](https://github.com/nektos/act)
-2. Install Docker
-3. Node.js 20 or later
-
-### Testing Locally
-
-1. Start the test infrastructure:
-```bash
-npm run docker:test:up
-```
-
-2. Run the action locally:
-```bash
-npm run test:action
-```
-
-3. Clean up:
-```bash
-npm run docker:test:down
-```
-
-## Inputs
-
-| Name | Description | Required | Default |
-|------|-------------|----------|---------|
-| test_url | Target URL to test | Yes | - |
-| aws_access_key_id | AWS Access Key ID | No | - |
-| aws_secret_access_key | AWS Secret Access Key | No | - |
-| aws_region | AWS Region | No | - |
-| s3_bucket | S3 Bucket name | No | - |
-| s3_endpoint | S3 Endpoint URL (for non-AWS services) | No | - |
-| s3_force_path_style | Use path-style addressing for S3 | No | false |
-| s3_tls_verify | Verify TLS certificates for S3 | No | true |
-| minio_access_key | MinIO Access Key | No | - |
-| minio_secret_key | MinIO Secret Key | No | - |
-| minio_root_user | MinIO Root User | No | - |
-| minio_root_password | MinIO Root Password | No | - |
-| minio_endpoint | MinIO Endpoint URL | No | - |
-| prometheus_pushgateway | Prometheus Pushgateway URL | Yes | - |
-| browser | Browser to use for testing | No | chromium |
-| config_path | Path to Playwright config file | No | - |
-| test_dir | Directory containing test files | No | - |
-| env_vars | JSON string of additional environment variables | No | {} |
-
-## Example Test
-
-```typescript
-import { test } from '../src/monitoring';
-import { expect } from '@playwright/test';
-
-test('homepage performance test', async ({ page, monitoring }) => {
-  await test.step('Navigate to homepage', async () => {
-    await page.goto('/');
-    await page.waitForLoadState('networkidle');
+```html
+<script src="https://cdn.example.com/insightview-rum.iife.js"></script>
+<script>
+  InsightViewRUM.init({
+    endpoint: "https://rum.example.com/v1/events",
+    siteId: "my-site",
+    sampleRate: 1,
+    release: "app@1.2.3",
+    environment: "production",
   });
-  
-  await test.step('Verify page title', async () => {
-    await expect(page).toHaveTitle(/Expected Title/);
-  });
-  
-  await test.step('Collect monitoring data', async () => {
-    await monitoring();
-  });
+</script>
+```
+
+Or via an ESM import in a bundled app:
+
+```ts
+import { init } from "@insightview/rum-sdk";
+
+init({
+  endpoint: "https://rum.example.com/v1/events",
+  siteId: "my-site",
+  autoInstrument: {
+    webVitals: true,
+    errors: true,
+    navigation: true,
+    resources: false,
+  },
 });
 ```
 
-## Project Structure
+## Repository layout
 
 ```
-├── src/
-│   ├── types/           # TypeScript type definitions
-│   ├── collectors/      # Metric collection modules
-│   │   ├── webVitals.ts
-│   │   └── testMetrics.ts
-│   ├── exporters/       # Metric export modules
-│   │   ├── prometheus.ts
-│   │   └── s3.ts
-│   └── monitoring.ts    # Main monitoring module
-├── tests/              # Example tests
-├── action.yml          # GitHub Action definition
-└── .github/
-    └── workflows/      # CI/CD workflows
+packages/
+  core/            - shared types, enums, event envelopes
+  db/              - Prisma schema + repositories (Postgres)
+  event-bus/       - EventBus interface + BullMQ impl
+  observability/   - pino + prom-client helpers
+  rum-sdk/         - browser RUM SDK (esbuild IIFE build)
+
+apps/
+  api/               - Fastify REST API + metrics + monitors-as-code
+  scheduler/         - Leader-elected cron reconciler + watchdog
+  runner/            - Playwright-based check executor
+  runner/src/legacy/ - Preserved v1 Playwright fixture path
+  alerting/          - Strategy evaluator + channel dispatcher
+  rum-collector/     - Fastify RUM intake + validation
+  dashboard/         - Vite + React SPA
+  action-dispatcher/ - CLI powering the composite GitHub Action
+
+infra/
+  docker-compose.yml        - Full stack
+  docker/                   - Service Dockerfiles
+  prometheus/prometheus.yml - Scrape config
+  test-site/                - nginx-served HTML + RUM SDK bundle
+  e2e/                      - End-to-end test harness
+
+monitors/
+  *.yaml           - Monitors-as-code definitions
+
+.github/workflows/
+  run-check.yml                   - command: run
+  deploy-monitors.yml             - command: deploy
+  validate-monitors.yml           - command: validate
+  e2e.yml                         - full stack end-to-end gate
+  legacy-synthetic-monitoring.yml - v1 cron workflow (deprecated)
+
+docs/
+  ARCHITECTURE.md
+  ROADMAP.md
+  GAP_ANALYSIS.md
+  adr/0001..0006-*.md
+  SECRETS_CONFIGURATION.md
+```
+
+## Local development
+
+```bash
+pnpm install
+pnpm typecheck           # typecheck all workspaces
+pnpm build               # compile all workspaces
+pnpm compose:up          # full-stack dev loop
+pnpm compose:logs        # tail all service logs
+pnpm compose:down        # stop and remove volumes
+```
+
+Individual services:
+
+```bash
+pnpm --filter @insightview/api run dev          # watch-reload the API
+pnpm --filter @insightview/dashboard run dev    # watch-reload the dashboard
+pnpm --filter @insightview/rum-sdk run build    # build the SDK IIFE
+```
+
+## Running the end-to-end test
+
+The `infra/e2e/e2e.ts` script exercises every layer of the platform:
+
+1. Waits for `/healthz` on the API.
+2. Deploys a monitor via `POST /v1/monitors/apply`.
+3. Triggers a synthetic run and polls until terminal.
+4. Asserts the result lands in Postgres (via the REST API).
+5. Asserts Prometheus Pushgateway received `synthetic_monitoring_*` metrics.
+6. Asserts MinIO received a screenshot artifact.
+7. Drives the test-site with a real headless Chromium to fire RUM events.
+8. Asserts the RUM collector persisted Web Vital + navigation events.
+9. Triggers a guaranteed-fail check and verifies an alert incident fires.
+
+```bash
+pnpm e2e:up       # docker compose up --wait
+pnpm e2e:test     # run the assertion suite
+pnpm e2e:down     # tear down
+# or all-in-one:
+pnpm e2e          # up, test, down (propagates test exit code)
 ```
 
 ## License
 
-MIT
+MIT — see LICENSE.

@@ -1,0 +1,47 @@
+# Shared Dockerfile used by api, scheduler, alerting, rum-collector.
+# The SERVICE build arg selects which package.json is the entry point
+# (we still install the full workspace so cross-package imports work).
+FROM node:20-slim AS base
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssl wget ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Enable pnpm via corepack
+RUN corepack enable && corepack prepare pnpm@10.0.0 --activate
+
+WORKDIR /app
+
+# Copy manifests first for better caching.
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* tsconfig.base.json tsconfig.json ./
+COPY packages/core/package.json packages/core/
+COPY packages/db/package.json packages/db/
+COPY packages/event-bus/package.json packages/event-bus/
+COPY packages/observability/package.json packages/observability/
+COPY packages/rum-sdk/package.json packages/rum-sdk/
+COPY apps/api/package.json apps/api/
+COPY apps/scheduler/package.json apps/scheduler/
+COPY apps/alerting/package.json apps/alerting/
+COPY apps/rum-collector/package.json apps/rum-collector/
+COPY apps/runner/package.json apps/runner/
+COPY apps/dashboard/package.json apps/dashboard/
+COPY apps/action-dispatcher/package.json apps/action-dispatcher/
+
+RUN pnpm install --frozen-lockfile=false
+
+# Copy sources
+COPY packages packages
+COPY apps apps
+COPY tsconfig.base.json ./
+
+# Generate Prisma client (needed by api/scheduler/alerting/rum-collector/runner)
+WORKDIR /app/packages/db
+RUN pnpm prisma generate
+
+WORKDIR /app
+
+ARG SERVICE
+ENV SERVICE=${SERVICE}
+
+EXPOSE 4000
+CMD sh -c "pnpm --filter @insightview/${SERVICE} run start"

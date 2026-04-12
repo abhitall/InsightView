@@ -4,21 +4,36 @@
 
 # Dependencies
 node_modules
+**/node_modules
 npm-debug.log
+pnpm-debug.log
+.pnpm-store
 
 # Build outputs
 dist
 build
 coverage
+**/dist
+**/build
+**/coverage
+*.tsbuildinfo
+.turbo
 
 # Environment files
 .env
 .env.*
+!.env.example
 
 # IDE files
 .vscode
 .idea
+*.swp
 
 # Test results
 test-results
 playwright-report
+**/playwright-report
+**/test-results
+
+# Prisma generated client (re-generated in the image)
+packages/db/src/generated

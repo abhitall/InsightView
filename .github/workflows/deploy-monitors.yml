@@ -1,0 +1,26 @@
+name: Deploy Monitors
+
+# Monitors-as-code pipeline. On every push to main that touches any
+# file under monitors/, the action uploads every YAML to the platform
+# API which diffs, upserts, and records a deployment row.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "monitors/**"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy monitors
+        uses: ./
+        with:
+          command: deploy
+          api_url: ${{ secrets.INSIGHTVIEW_API_URL }}
+          api_token: ${{ secrets.INSIGHTVIEW_API_TOKEN }}
+          monitors_path: monitors

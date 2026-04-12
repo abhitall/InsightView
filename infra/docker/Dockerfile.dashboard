@@ -1,0 +1,35 @@
+# Dashboard is a Vite SPA. Build it, then serve via nginx so preview
+# is a single static directory that doesn't depend on a runtime.
+FROM node:20-slim AS builder
+
+RUN corepack enable && corepack prepare pnpm@10.0.0 --activate
+WORKDIR /app
+
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* tsconfig.base.json tsconfig.json ./
+COPY packages/core/package.json packages/core/
+COPY packages/db/package.json packages/db/
+COPY packages/event-bus/package.json packages/event-bus/
+COPY packages/observability/package.json packages/observability/
+COPY packages/rum-sdk/package.json packages/rum-sdk/
+COPY apps/api/package.json apps/api/
+COPY apps/scheduler/package.json apps/scheduler/
+COPY apps/alerting/package.json apps/alerting/
+COPY apps/rum-collector/package.json apps/rum-collector/
+COPY apps/runner/package.json apps/runner/
+COPY apps/dashboard/package.json apps/dashboard/
+COPY apps/action-dispatcher/package.json apps/action-dispatcher/
+
+RUN pnpm install --frozen-lockfile=false
+
+COPY packages packages
+COPY apps apps
+COPY tsconfig.base.json ./
+
+WORKDIR /app/apps/dashboard
+RUN pnpm run build
+
+FROM nginx:alpine
+COPY --from=builder /app/apps/dashboard/dist /usr/share/nginx/html
+COPY infra/docker/dashboard-nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 5173
+CMD ["nginx", "-g", "daemon off;"]

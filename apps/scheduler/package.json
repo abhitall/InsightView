@@ -1,0 +1,28 @@
+{
+  "name": "@insightview/scheduler",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/main.ts",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "echo 'no lint'",
+    "test": "echo 'no tests'"
+  },
+  "dependencies": {
+    "@insightview/core": "workspace:*",
+    "@insightview/db": "workspace:*",
+    "@insightview/event-bus": "workspace:*",
+    "@insightview/observability": "workspace:*",
+    "fastify": "^4.28.1",
+    "ioredis": "^5.4.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "@types/node": "^22.9.0"
+  }
+}

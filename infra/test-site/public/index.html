@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>InsightView — Test Site</title>
+    <style>
+      body {
+        font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+        background: #f5f7fb;
+        color: #1b2432;
+        margin: 0;
+      }
+      header {
+        background: #0f1419;
+        color: white;
+        padding: 32px;
+        text-align: center;
+      }
+      main {
+        max-width: 760px;
+        margin: 32px auto;
+        padding: 0 20px;
+      }
+      .card {
+        background: white;
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.05);
+        margin-bottom: 16px;
+      }
+      .hero-img {
+        width: 100%;
+        height: 220px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #6366f1, #0ea5e9);
+      }
+      nav a {
+        color: #6366f1;
+        margin-right: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>InsightView Test Site</h1>
+      <p>A target for synthetic checks and real user monitoring.</p>
+    </header>
+    <main>
+      <nav><a href="/">Home</a><a href="/about.html">About</a></nav>
+      <section class="card">
+        <div class="hero-img"></div>
+        <h2>Home</h2>
+        <p>
+          This page is instrumented with the InsightView RUM SDK. Every
+          visit emits web vitals, navigation timings and any JavaScript
+          errors to the collector running at
+          <code>http://rum-collector:4400</code>.
+        </p>
+        <p>InsightView monitoring platform is watching.</p>
+      </section>
+      <section class="card">
+        <h2>Slow content (for LCP)</h2>
+        <p id="slow">Loading…</p>
+      </section>
+    </main>
+    <script>
+      // Delay some content so LCP has something to report against.
+      setTimeout(() => {
+        const el = document.getElementById("slow");
+        if (el) el.textContent = "Content loaded after a short delay.";
+      }, 600);
+    </script>
+    <script src="/sdk/insightview-rum.iife.js"></script>
+    <script>
+      if (window.InsightViewRUM && InsightViewRUM.init) {
+        InsightViewRUM.init({
+          endpoint: "http://localhost:4400/v1/events",
+          siteId: "test-site-home",
+          sampleRate: 1,
+          environment: "dev",
+          release: "test-site@0.1.0",
+        });
+      } else {
+        console.warn("InsightViewRUM SDK not loaded");
+      }
+    </script>
+  </body>
+</html>

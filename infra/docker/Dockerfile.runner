@@ -1,0 +1,40 @@
+# Runner image is based on Playwright's official container so browsers
+# and system deps are preinstalled. Everything else follows the same
+# pnpm workspace install pattern as the other services.
+FROM mcr.microsoft.com/playwright:v1.51.0-noble
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN corepack enable && corepack prepare pnpm@10.0.0 --activate
+
+WORKDIR /app
+
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* tsconfig.base.json tsconfig.json ./
+COPY packages/core/package.json packages/core/
+COPY packages/db/package.json packages/db/
+COPY packages/event-bus/package.json packages/event-bus/
+COPY packages/observability/package.json packages/observability/
+COPY packages/rum-sdk/package.json packages/rum-sdk/
+COPY apps/api/package.json apps/api/
+COPY apps/scheduler/package.json apps/scheduler/
+COPY apps/alerting/package.json apps/alerting/
+COPY apps/rum-collector/package.json apps/rum-collector/
+COPY apps/runner/package.json apps/runner/
+COPY apps/dashboard/package.json apps/dashboard/
+COPY apps/action-dispatcher/package.json apps/action-dispatcher/
+
+RUN pnpm install --frozen-lockfile=false
+
+COPY packages packages
+COPY apps apps
+COPY tsconfig.base.json ./
+
+WORKDIR /app/packages/db
+RUN pnpm prisma generate
+
+WORKDIR /app
+
+EXPOSE 4200
+CMD ["pnpm", "--filter", "@insightview/runner", "run", "start"]
