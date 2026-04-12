@@ -1,0 +1,61 @@
+# Example Actions-native monitor. This file is picked up by the
+# `native-synthetic.yml` workflow (and by the `InsightView@v2` action
+# with `command: native-run`) and exercised directly inside a GitHub
+# Actions runner — no separate platform required.
+
+apiVersion: insightview.io/v1
+kind: Check
+metadata:
+  name: example-com-home
+  description: "Public homepage monitor for https://example.com"
+  tags: ["public", "smoke"]
+spec:
+  type: browser
+  schedule: "*/15 * * * *"
+  targetUrl: "https://example.com/"
+  timeoutMs: 45000
+  retries: 1
+  assertions:
+    - type: status
+      value: passed
+    - type: title-contains
+      value: "Example Domain"
+    - type: max-lcp-ms
+      value: "4000"
+    - type: max-cls
+      value: "0.1"
+  steps:
+    - name: home
+      url: "https://example.com/"
+      waitFor:
+        networkIdle: false
+        timeoutMs: 30000
+  native:
+    # Path to a pre-baked Playwright storageState.json for authenticated
+    # monitors. Remove or replace with `form-login` / `totp` / etc.
+    auth:
+      strategy: none
+      config: {}
+    network:
+      profile: direct
+    exporters:
+      - type: stdout
+      - type: github-artifact
+        config:
+          dir: artifacts
+      # - type: pushgateway
+      #   config:
+      #     url: ${PROMETHEUS_PUSHGATEWAY}
+      # - type: healthchecks
+      #   config:
+      #     url: ${INSIGHTVIEW_HEARTBEAT_URL}
+      # - type: s3
+      #   config:
+      #     bucket: insightview-synthetic
+      #     region: us-east-1
+      # - type: platform
+      #   config:
+      #     apiUrl: https://insightview.example.com
+    # Pre-set consent cookies to keep LCP / CLS stable between runs
+    # (the consent banner is the #1 cause of CLS noise).
+    preCookies: []

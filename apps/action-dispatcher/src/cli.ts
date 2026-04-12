@@ -17,6 +17,7 @@ import { deployCommand } from "./commands/deploy.js";
 import { validateCommand } from "./commands/validate.js";
 import { statusCommand } from "./commands/status.js";
 import { legacyRunCommand } from "./commands/legacyRun.js";
+import { nativeRunCommand } from "./commands/nativeRun.js";
 
 const commands: Record<string, (args: string[]) => Promise<number>> = {
   run: runCommand,
@@ -24,6 +25,7 @@ const commands: Record<string, (args: string[]) => Promise<number>> = {
   validate: validateCommand,
   status: statusCommand,
   "legacy-run": legacyRunCommand,
+  "native-run": nativeRunCommand,
 };
 
 async function main() {
@@ -31,7 +33,7 @@ async function main() {
   const rest = process.argv.slice(3);
   if (!command || !commands[command]) {
     console.error(
-      `Usage: insightview <run|deploy|validate|status|legacy-run> [args]`,
+      `Usage: insightview <run|deploy|validate|status|native-run|legacy-run> [args]`,
     );
     process.exit(1);
   }

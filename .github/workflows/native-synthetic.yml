@@ -1,0 +1,132 @@
+name: Native Synthetic Monitoring
+
+# Actions-native synthetic monitoring. Runs entirely inside a GitHub
+# Actions runner — no platform API, no Docker compose stack, no DB.
+# This is the recommended pattern for teams that want the lowest
+# operational overhead while still getting production-grade
+# synthetic monitoring with Web Vitals, assertions, and alerting.
+#
+# Reliability notes:
+#  - GitHub cron is best-effort and can be delayed up to 60 minutes
+#    under load (or silently drop runs entirely). We mitigate this
+#    three ways:
+#
+#      1. `workflow_dispatch` lets you (or an external scheduler)
+#         kick runs any time via the REST API:
+#         POST /repos/OWNER/REPO/actions/workflows/native-synthetic.yml/dispatches
+#
+#      2. `repository_dispatch` receives custom event-type pings
+#         from external systems (AWS EventBridge, cron service,
+#         PagerDuty) so you can use a "real" scheduler elsewhere.
+#
+#      3. The `heartbeat_url` input pings Healthchecks.io (or any
+#         compatible dead-man's-switch) on every successful run.
+#         If the expected heartbeat fails to arrive, that service
+#         will page you — catching both dropped runs AND
+#         infrastructure outages in our own runner.
+#
+#  - The workflow uses the official Playwright container image so
+#    browsers are pre-installed; this eliminates the single most
+#    common CI failure mode (apt repository outages during
+#    `playwright install --with-deps`).
+#
+# See docs/adr/0007-actions-native-synthetic.md for the full rationale.
+
+on:
+  schedule:
+    # Every 15 minutes — the minimum GitHub supports. You should run
+    # this from your default branch; schedules on feature branches
+    # are silently ignored.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      monitor:
+        description: "Optional monitor name to run (omit for all)"
+        required: false
+        type: string
+      target_url:
+        description: "Optional override for the monitor's targetUrl"
+        required: false
+        type: string
+  repository_dispatch:
+    types: [synthetic-run, synthetic-monitor-trigger]
+
+concurrency:
+  group: native-synthetic
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write  # for OIDC-based AWS/Vault auth
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: mcr.microsoft.com/playwright:v1.51.0-noble
+      options: --user 1001 --ipc=host
+    env:
+      INSIGHTVIEW_MONITORS_PATH: monitors
+      INSIGHTVIEW_ARTIFACTS_DIR: artifacts
+      INSIGHTVIEW_LOCATION: github-actions-ubuntu-latest
+      # Optional: dead-man's-switch (create at https://healthchecks.io)
+      INSIGHTVIEW_HEARTBEAT_URL: ${{ secrets.HC_PING_URL }}
+      # Optional: Prometheus Pushgateway target
+      PROMETHEUS_PUSHGATEWAY: ${{ secrets.PROMETHEUS_PUSHGATEWAY }}
+      # Optional: target a specific monitor via manual dispatch
+      INSIGHTVIEW_MONITOR: ${{ inputs.monitor }}
+      # App credentials for auth strategies
+      APP_USERNAME: ${{ secrets.APP_USERNAME }}
+      APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+      TOTP_SECRET: ${{ secrets.TOTP_SECRET }}
+      OAUTH_CLIENT_ID: ${{ secrets.OAUTH_CLIENT_ID }}
+      OAUTH_CLIENT_SECRET: ${{ secrets.OAUTH_CLIENT_SECRET }}
+      MTLS_CERT_BASE64: ${{ secrets.MTLS_CERT_BASE64 }}
+      MTLS_KEY_BASE64: ${{ secrets.MTLS_KEY_BASE64 }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ──────────────────────────────────────────────────────────
+      # Optional network setup. Uncomment the step matching your
+      # topology. The synthetic-kit will see the tunneled interface
+      # as a normal network route.
+      # ──────────────────────────────────────────────────────────
+      # - name: Join Tailscale (private network access)
+      #   uses: tailscale/github-action@v4
+      #   with:
+      #     oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+      #     oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+      #     tags: tag:ci
+      #
+      # - name: Configure AWS (OIDC, no static keys)
+      #   uses: aws-actions/configure-aws-credentials@v4
+      #   with:
+      #     role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+      #     aws-region: us-east-1
+
+      - name: Run native synthetic checks
+        uses: ./
+        with:
+          command: native-run
+          monitors_path: monitors
+          heartbeat_url: ${{ env.INSIGHTVIEW_HEARTBEAT_URL }}
+          artifacts_dir: artifacts
+
+      - name: Upload artifacts (screenshots, traces, JSON envelopes)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # Failure-side heartbeat so dead-man's-switch can distinguish
+      # "run happened but failed" from "run never happened at all".
+      - name: Heartbeat FAIL ping (on failure)
+        if: failure() && env.INSIGHTVIEW_HEARTBEAT_URL != ''
+        run: |
+          curl -fsS --retry 3 --retry-delay 2 --max-time 10 \
+            "${{ env.INSIGHTVIEW_HEARTBEAT_URL }}/fail" > /dev/null || true

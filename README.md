@@ -3,14 +3,21 @@
 **InsightView is an open-source monitoring platform that unifies synthetic
 monitoring and real-user monitoring, fully scriptable from GitHub Actions.**
 
-It grew out of a Playwright-based synthetic monitoring GitHub Action
-(`abhitall/InsightView@v1`) and has evolved into a full platform MVP
-with distributed scheduling, alerting, RUM, and a React dashboard —
-all runnable from a single `docker compose up`.
+It ships in two modes that share the same monitors-as-code YAML,
+assertion vocabulary, and exporter set:
 
-The v1 Action usage is still supported via `command: legacy-run`, so
-existing workflows keep working with zero changes while you migrate to
-the platform at your own pace.
+- **Actions-native** — run Playwright monitors end-to-end inside a
+  GitHub Actions runner with no separate infrastructure. Recommended
+  for most teams. See [ADR 0007](docs/adr/0007-actions-native-synthetic.md)
+  for the design and reliability fixes.
+- **Platform** — full docker-compose stack with distributed
+  scheduler, alerting engine, RUM collector, and React dashboard.
+  Recommended when you need central aggregation across many
+  monitors, tenants, or regions.
+
+Both modes are first-class. The v1 Action usage is still supported
+via `command: legacy-run`, so existing workflows keep working with
+zero changes while you migrate.
 
 ## What you get
 
@@ -78,6 +85,79 @@ When the stack is up:
 Tear down with `pnpm compose:down`.
 
 ## GitHub Action usage
+
+### Recommended: Actions-native synthetic monitoring
+
+Zero infrastructure. Runs your monitors directly inside the GitHub
+Actions runner, collects Web Vitals with every reliability fix the
+research uncovered, and pings a dead-man's-switch on success.
+
+```yaml
+# .github/workflows/native-synthetic.yml (see full example in this repo)
+on:
+  schedule: [{ cron: "*/15 * * * *" }]
+  workflow_dispatch:
+  repository_dispatch:
+    types: [synthetic-run]
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.51.0-noble
+      options: --user 1001 --ipc=host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: abhitall/InsightView@v2
+        with:
+          command: native-run
+          monitors_path: monitors
+          heartbeat_url: ${{ secrets.HC_PING_URL }}
+```
+
+Write your monitors in `monitors/*.yaml`:
+
+```yaml
+apiVersion: insightview.io/v1
+kind: Check
+metadata:
+  name: homepage
+spec:
+  type: browser
+  targetUrl: "https://example.com/"
+  timeoutMs: 45000
+  assertions:
+    - { type: status, value: passed }
+    - { type: title-contains, value: "Example Domain" }
+    - { type: max-lcp-ms, value: "2500" }
+    - { type: max-cls, value: "0.1" }
+  native:
+    auth: { strategy: none, config: {} }
+    network: { profile: direct }
+    exporters:
+      - { type: stdout }
+      - { type: github-artifact, config: { dir: artifacts } }
+      - { type: pushgateway, config: { url: "https://pushgateway.example.com" } }
+```
+
+The native-run command is built on `@insightview/synthetic-kit`,
+which ships every reliability fix the research uncovered:
+
+- Bundled `web-vitals` IIFE + `bypassCSP` + `reportAllChanges` +
+  forced `visibilitychange → hidden` so LCP, CLS, and INP actually
+  resolve in headless Chromium.
+- Navigation Timing API as a guaranteed fallback — if web-vitals
+  fails, you still get TTFB, FCP, DNS, TLS, DCL, and load time.
+- 4-category error classification (`TARGET_DOWN` / `TARGET_ERROR` /
+  `INFRA_FAILURE` / `PARTIAL`) so alerting can distinguish "your
+  site is down" from "our CI broke".
+- Strategy-pattern auth: `none`, `storage-state`, `form-login`,
+  `totp`, `oauth-client-credentials`. MFA is a one-liner.
+- Strategy-pattern network: `direct`, `proxy`, `mtls`, `tailscale`,
+  `wireguard`. Tailscale support is workflow-level — drop in
+  `tailscale/github-action@v4` before the InsightView step.
+- 6 exporters: `stdout`, `pushgateway`, `s3`, `github-artifact`,
+  `healthchecks`, `platform`. Combine as needed.
 
 ### New: trigger a platform run
 

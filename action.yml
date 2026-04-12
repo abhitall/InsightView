@@ -6,9 +6,9 @@ branding:
 
 inputs:
   command:
-    description: "Command: run | deploy | validate | status | legacy-run"
+    description: "Command: run | deploy | validate | status | native-run | legacy-run"
     required: false
-    default: "legacy-run"
+    default: "native-run"
 
   # Platform inputs (used by run|deploy|validate|status)
   api_url:
@@ -21,13 +21,22 @@ inputs:
     description: "Check name to trigger (run) or query (status)"
     required: false
   monitors_path:
-    description: "Directory containing monitors-as-code YAML files"
+    description: "Directory (or file) containing monitors-as-code YAML"
     required: false
     default: "monitors"
   wait:
     description: "For 'run': wait for the run to reach a terminal state (true/false)"
     required: false
     default: "true"
+
+  # Actions-native inputs (used by native-run)
+  heartbeat_url:
+    description: "Dead man's switch URL (e.g. https://hc-ping.com/<uuid>). Pinged on success."
+    required: false
+  artifacts_dir:
+    description: "Directory to write screenshots, traces, and per-run JSON"
+    required: false
+    default: "artifacts"
 
   # Legacy inputs (back-compat for command: legacy-run)
   test_url:
@@ -118,6 +127,25 @@ runs:
       working-directory: ${{ github.action_path }}
       run: pnpm install --frozen-lockfile=false
 
+    - name: Generate Prisma client
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: pnpm --filter @insightview/db run generate
+
+    - name: Install Playwright browsers (for legacy-run, native-run)
+      if: ${{ inputs.command == 'legacy-run' || inputs.command == 'native-run' }}
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        # The official Playwright container image ships browsers already;
+        # `playwright install` is a no-op there. On a plain ubuntu-latest
+        # runner it downloads them. --with-deps adds system libs when root.
+        if [ "$(id -u)" = "0" ]; then
+          pnpm --filter @insightview/runner exec playwright install --with-deps ${{ inputs.browser || 'chromium' }}
+        else
+          pnpm --filter @insightview/runner exec playwright install ${{ inputs.browser || 'chromium' }}
+        fi
+
     - name: Dispatch
       id: dispatch
       shell: bash
@@ -128,6 +156,8 @@ runs:
         INSIGHTVIEW_CHECK_NAME: ${{ inputs.check_name }}
         INSIGHTVIEW_MONITORS_PATH: ${{ inputs.monitors_path }}
         INSIGHTVIEW_WAIT: ${{ inputs.wait }}
+        INSIGHTVIEW_HEARTBEAT_URL: ${{ inputs.heartbeat_url }}
+        INSIGHTVIEW_ARTIFACTS_DIR: ${{ inputs.artifacts_dir }}
         # Legacy env vars for command: legacy-run
         PROMETHEUS_PUSHGATEWAY: ${{ inputs.prometheus_pushgateway }}
         TEST_URL: ${{ inputs.test_url }}
@@ -146,8 +176,29 @@ runs:
       run: |
         set -euo pipefail
         echo "InsightView Action command: ${{ inputs.command }}"
-        if [ "${{ inputs.command }}" = "legacy-run" ]; then
-          pnpm --filter @insightview/runner run legacy:test
-        else
-          pnpm --filter @insightview/action-dispatcher start -- ${{ inputs.command }}
-        fi
+        case "${{ inputs.command }}" in
+          legacy-run)
+            pnpm --filter @insightview/runner run legacy:test
+            ;;
+          native-run)
+            pnpm --filter @insightview/action-dispatcher start -- native-run \
+              --spec "${{ inputs.monitors_path }}"
+            ;;
+          run|deploy|validate|status)
+            pnpm --filter @insightview/action-dispatcher start -- ${{ inputs.command }}
+            ;;
+          *)
+            echo "Unknown command: ${{ inputs.command }}"
+            exit 1
+            ;;
+        esac
+
+    - name: Heartbeat ping (dead man's switch)
+      if: success() && inputs.heartbeat_url != ''
+      shell: bash
+      run: |
+        # Ping the external dead-man's-switch service. We retry with
+        # exponential backoff because the default 5-minute grace is
+        # tight if the network is flaky.
+        curl -fsS --retry 3 --retry-delay 2 --max-time 10 \
+          "${{ inputs.heartbeat_url }}" > /dev/null || echo "heartbeat ping failed (non-fatal)"

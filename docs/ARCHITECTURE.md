@@ -19,7 +19,29 @@ critical gap in a single docker-compose stack while preserving the
 Playwright+TypeScript developer experience and full backwards
 compatibility with the original GitHub Action.
 
-## High-level design
+## Two modes, one codebase
+
+InsightView ships two execution modes that share the same monitors-
+as-code YAML, assertion vocabulary, error classification, and
+exporter set:
+
+1. **Platform mode** — the docker-compose stack. Distributed
+   scheduler, alerting engine, RUM collector, React dashboard,
+   Postgres/Redis/MinIO/Prometheus. Best for teams that want central
+   aggregation across many monitors, tenants, and regions.
+
+2. **Actions-native mode** — a single GitHub Actions workflow that
+   runs Playwright monitors end-to-end inside the runner, with no
+   separate infrastructure. Best for teams that want the lowest
+   operational overhead while still getting production-grade
+   reliability. See [ADR 0007](adr/0007-actions-native-synthetic.md)
+   for the detailed design and reliability fixes.
+
+Both modes read the same `monitors/*.yaml` files and emit the same
+`ResultEnvelope` shape, so you can start in Actions-native mode and
+layer the platform on top later without rewriting anything.
+
+## High-level design (platform mode)
 
 ```
 ┌───────────────────────────── user layer ─────────────────────────────┐
@@ -255,3 +277,57 @@ The ROADMAP lists every deferred item, but the three biggest ones are:
 
 See `docs/ROADMAP.md` for the phased plan and `docs/GAP_ANALYSIS.md`
 for the severity matrix.
+
+## Actions-native mode
+
+```
+┌─ GitHub Actions runner (ubuntu-latest, Playwright container) ────┐
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │ action.yml  command: native-run                            │  │
+│  │   ↓                                                         │  │
+│  │ apps/action-dispatcher  nativeRun.ts                        │  │
+│  │   ↓                                                         │  │
+│  │ packages/synthetic-kit  runCheck(spec)                      │  │
+│  │   ├─ bundled web-vitals IIFE (no CDN fetch)                 │  │
+│  │   ├─ bypassCSP: true, reportAllChanges: true                │  │
+│  │   ├─ forced visibilitychange → hidden                       │  │
+│  │   ├─ Navigation Timing fallback (always collected)          │  │
+│  │   ├─ CDP Performance.getMetrics                             │  │
+│  │   ├─ Auth: none / storage-state / form-login / TOTP / OAuth │  │
+│  │   ├─ Network: direct / proxy / mtls / tailscale             │  │
+│  │   └─ 4-category error classification                        │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                         │                                        │
+│          Exporters (fire-and-forget, partial-safe)               │
+│   ┌─────────┬──────────┬──────────┬──────────┬──────────┐        │
+│   ▼         ▼          ▼          ▼          ▼          ▼        │
+│ stdout  pushgateway   s3      github-artifact  hc-ping platform  │
+└──────────────────────────────────────────────────────────────────┘
+
+Triggering (workflow-level reliability):
+  - schedule: cron (best-effort)                                    ┐
+  - workflow_dispatch (manual / REST API)                           ├── dual
+  - repository_dispatch (external scheduler: EventBridge, etc.)     ┘
+  - dead-man's-switch heartbeat → healthchecks.io on success/fail
+```
+
+### Reliability fixes built into the synthetic-kit
+
+The following reliability fixes were uncovered through research and
+are all implemented in `packages/synthetic-kit`:
+
+| Failure mode | Fix |
+|---|---|
+| LCP/CLS never resolve in headless Playwright | `reportAllChanges: true` + forced `visibilitychange → hidden` dispatch before collection |
+| CSP blocks unpkg web-vitals CDN | Bundle web-vitals IIFE content from `node_modules` at process start; inject via `addInitScript({ content })` |
+| Strict `script-src` blocks `addInitScript` | `bypassCSP: true` on every BrowserContext |
+| INP needs a real interaction | Simulate `page.click("body", { force: true })` before finalizing |
+| Consent banner becomes the LCP target | `preCookies` array lets the spec pre-set consent before navigation |
+| Playwright browser install fails in CI | Pin `container: mcr.microsoft.com/playwright:v1.51.0-noble` in the workflow |
+| GitHub Actions cron is dropped silently | Triple-trigger (schedule + workflow_dispatch + repository_dispatch) + dead-man's-switch heartbeat |
+| Target down vs. our CI broken ambiguity | `classifyError` returns one of `TARGET_DOWN`, `TARGET_ERROR`, `INFRA_FAILURE`, `PARTIAL` |
+| Total collection failure loses all data | Always emit Navigation Timing fallback so TTFB/FCP/DNS/TLS/DCL/load survive even if web-vitals fails |
+| Auth requires credentials in code | Strategy pattern: `none`, `storage-state`, `form-login`, `totp`, `oauth-client-credentials` |
+| Private network access needs a VPN | `tailscale/github-action@v4` installs the tunnel at workflow level; synthetic-kit sees a normal route |
+| mTLS for client-certificate endpoints | `mtls` network profile loads cert+key from base64 env vars |
