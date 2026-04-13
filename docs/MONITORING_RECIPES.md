@@ -236,8 +236,195 @@ spec:
 
 For MFA-protected apps, use `totp`; for enterprise SSO use
 `storage-state` with a setup helper that walks through the IdP
-redirect chain. For Vault-managed dynamic credentials use
-`vault-oidc` — it handles dual-credential rotation automatically.
+redirect chain.
+
+### Vault-managed credentials (`vault-oidc`)
+
+Use `vault-oidc` when your secrets live in HashiCorp Vault and
+you want the workflow to exchange its OIDC token for dynamic
+credentials. The `hashicorp/vault-action@v2` step populates
+`VAULT_APP_USERNAME` / `VAULT_APP_PASSWORD` and the auth
+strategy reads them. Dual-credential rotation is built in: on
+failure with the primary, the strategy falls back to
+`VAULT_APP_USERNAME_PREV` / `VAULT_APP_PASSWORD_PREV` and logs
+a rotation warning.
+
+```yaml
+# In your workflow, before the InsightView step:
+- uses: hashicorp/vault-action@v2
+  with:
+    url: https://vault.example.com:8200
+    method: jwt
+    role: synthetic-monitoring
+    secrets: |
+      secret/data/monitoring/app username | VAULT_APP_USERNAME ;
+      secret/data/monitoring/app password | VAULT_APP_PASSWORD ;
+      secret/data/monitoring/app username_prev | VAULT_APP_USERNAME_PREV ;
+      secret/data/monitoring/app password_prev | VAULT_APP_PASSWORD_PREV
+```
+
+```yaml
+# monitors/production-dashboard.yaml
+apiVersion: insightview.io/v1
+kind: Check
+metadata:
+  name: production-dashboard-vault
+spec:
+  type: browser
+  schedule: "*/10 * * * *"
+  targetUrl: "https://app.example.com/dashboard"
+  native:
+    auth:
+      strategy: vault-oidc
+      config:
+        loginUrl: https://app.example.com/login
+        usernameSelector: "#email"
+        passwordSelector: "#password"
+        submitSelector: "button[type='submit']"
+        successUrlPattern: "**/dashboard"
+    exporters: [{ type: stdout }, { type: pushgateway }]
+```
+
+## Anomaly detection alerting
+
+Rolling z-score over the last 20 runs — fires when the current
+LCP deviates more than 3σ above the rolling mean. Catches
+regressions that static thresholds miss. Full algorithm in
+[ADR 0011](adr/0011-anomaly-detection-strategy.md).
+
+```yaml
+# monitors/homepage.yaml
+apiVersion: insightview.io/v1
+kind: Check
+metadata:
+  name: homepage
+spec:
+  type: browser
+  schedule: "*/5 * * * *"
+  targetUrl: "https://example.com/"
+  assertions:
+    - { type: status, value: passed }
+---
+apiVersion: insightview.io/v1
+kind: AlertRule
+metadata:
+  name: homepage-lcp-anomaly
+spec:
+  checkName: homepage
+  strategy: ANOMALY_DETECTION
+  expression:
+    metric: LCP
+    threshold: 3.0       # z-score cutoff
+    window: 20           # look at last 20 runs
+    minSamples: 5        # need 5 samples before firing
+    direction: higher    # regressions only, not improvements
+  severity: WARNING
+  channels: [stdout, slack]
+---
+apiVersion: insightview.io/v1
+kind: AlertRule
+metadata:
+  name: homepage-cls-anomaly
+spec:
+  checkName: homepage
+  strategy: ANOMALY_DETECTION
+  expression:
+    metric: CLS
+    threshold: 2.5
+    direction: both      # any large shift, up or down
+  severity: WARNING
+```
+
+## RUM-driven alerting
+
+Fire on aggregated **real user** data instead of the current
+synthetic run. The evaluator pre-computes a 15-minute rolling
+aggregate before calling the strategy.
+
+```yaml
+apiVersion: insightview.io/v1
+kind: AlertRule
+metadata:
+  name: real-user-lcp-budget
+spec:
+  checkName: homepage
+  strategy: RUM_METRIC
+  expression:
+    metric: LCP
+    percentile: p75      # "p50" | "p75" | "p95" | "mean"
+    operator: ">"
+    value: 2500          # Core Web Vitals "good" threshold
+    minSampleCount: 100  # don't fire on thin samples
+  severity: CRITICAL
+  channels: [stdout, pagerduty]
+```
+
+Use RUM-driven alerting for user-facing SLOs, and synthetic
+ANOMALY_DETECTION for controlled baselines. A typical setup
+alerts on a rising RUM p75 but not synthetic, which usually
+means a geographic regression (new edge PoP misbehaving, CDN
+issue, third-party script change).
+
+## OpenTelemetry trace correlation
+
+When the target site is OTel-instrumented, the synthetic-kit
+propagates a W3C `traceparent` header on every Playwright
+navigation. The workflow exports OTLP via env var:
+
+```yaml
+# .github/workflows/native-synthetic.yml
+- uses: abhitall/InsightView@v2
+  with:
+    command: native-run
+    monitors_path: monitors
+  env:
+    OTEL_EXPORTER_OTLP_ENDPOINT: https://tempo.example.com/v1/traces
+    OTEL_SERVICE_NAME: insightview-native
+```
+
+The synthetic check becomes the **root span** of a distributed
+trace that flows into the customer's backend. An on-call
+engineer debugging a slow run clicks through from
+`ResultEnvelope.githubContext.runId` → trace id → Tempo/Jaeger
+→ the exact backend span responsible.
+
+No recipe changes are needed on the monitor YAML — the
+integration is automatic when `OTEL_EXPORTER_OTLP_ENDPOINT` is
+set. ADR 0012 describes the full propagation path.
+
+## PR deploy gate
+
+Block merges when a synthetic monitor degrades. Uses the
+`status` command with `--fail-on-degrade`:
+
+```yaml
+# .github/workflows/pr-gate.yml
+name: Production Health Gate
+on:
+  pull_request:
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: abhitall/InsightView@v2
+        with:
+          command: status
+          api_url: ${{ secrets.INSIGHTVIEW_API_URL }}
+          api_token: ${{ secrets.INSIGHTVIEW_API_TOKEN }}
+          check_name: production-homepage
+        env:
+          INSIGHTVIEW_FAIL_ON_DEGRADE: "true"
+      - name: Block if unhealthy
+        if: steps.gate.outputs.latest_status != 'PASSED'
+        run: |
+          echo "::error::Production monitor is not passing — blocking merge"
+          exit 1
+```
+
+The step sets `latest_status` and `success_ratio` outputs that
+later steps can read. Pair with `--window 20 --min-success-ratio 0.95`
+to require 95%+ success across the last 20 runs.
 
 ## Network profiles
 
@@ -247,7 +434,20 @@ redirect chain. For Vault-managed dynamic credentials use
 | Private network via Tailscale | `tailscale` (set up via `tailscale/github-action@v4` before the step) |
 | Corporate proxy | `proxy` with `{ server: "http://proxy:3128" }` |
 | mTLS client cert | `mtls` with cert+key in base64 env vars |
+| Throttled mobile 3G baseline | `direct` + `networkEmulation: "fast-3g"` on the runCheck call |
 
 See the `native-synthetic.yml` example workflow for the Tailscale
 setup step; it's commented-in so you can uncomment and drop in
 your OAuth credentials.
+
+## Public status page
+
+No code. The API auto-renders an unauthenticated HTML status
+page at `/v1/status/` and a JSON version at `/v1/status.json`.
+Point a CDN or ingress at the API and the page is served
+without auth (the tenant plugin allow-lists these paths).
+
+```bash
+curl https://api.example.com/v1/status.json
+# { "ok": true, "updatedAt": "...", "monitors": [...] }
+```

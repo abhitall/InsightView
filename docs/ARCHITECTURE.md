@@ -51,64 +51,117 @@ and add features.
 ## High-level design (platform mode)
 
 ```
-┌───────────────────────────── user layer ─────────────────────────────┐
-│ React dashboard │ REST API │ GitHub Action │ monitors-as-code (YAML) │
+┌──────────────────────────── USER LAYER ───────────────────────────────┐
+│ React dashboard │ REST API │ GitHub Action (6 cmds) │ monitors-as-code│
+│ Public status page │ Terraform HCL modules │ Grafana dashboards      │
 └───────┬──────────────┬─────────────┬──────────────────────────────────┘
         │              │             │
 ┌───────▼──────────────▼─────────────▼──────────────────────────────────┐
-│                          control plane                               │
-│ apps/api (Fastify)        - check CRUD, run trigger, monitors apply   │
-│ apps/scheduler            - leader-elected cron reconciler + watchdog │
-│ apps/alerting             - strategy evaluator + channel dispatcher   │
+│                          AUTH PLANE (ADR 0012)                       │
+│ tenant plugin: static API_TOKEN | issued iv_* tokens | anonymous     │
+│ requireRole("admin" | "write" | "read") route guards                 │
+│ ApiToken (SHA-256 hashed, role + scopes + TTL + revokedAt)           │
+│ AuditLog: every mutating request records (actor, action, resource)   │
 └───────┬──────────────────────────────────────────────────────────────┘
-        │  publishes/subscribes via @insightview/event-bus
+        │
+┌───────▼──────────────────────────────────────────────────────────────┐
+│                          CONTROL PLANE                              │
+│ apps/api (Fastify)        - checks, runs, alerts, monitors/ingest   │
+│                             + tokens + audit + source-maps          │
+│                             + public status page + /metrics         │
+│ apps/scheduler            - leader-elected cron reconciler          │
+│                             + WatchdogHeartbeat (dead-man)          │
+│                             + TimeoutReaper                         │
+│                             + OutboxPublisher (Kafka mode only)     │
+│ apps/alerting             - 5 strategies: threshold, consecutive,   │
+│                             composite, anomaly z-score, rum-metric  │
+└───────┬──────────────────────────────────────────────────────────────┘
+        │  publishes/subscribes via @insightview/event-bus (ADR 0002)
         ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│                   event bus (BullMQ-on-Redis for MVP)                │
-│   topics: checks.scheduled | checks.started | checks.completed       │
-│           alerts.triggered | alerts.resolved | rum.events.ingested   │
+│            EVENT BUS  (BullMQ default, Kafka via env var)            │
+│   Factory picks backend from BUS_BACKEND / KAFKA_BROKERS             │
+│   Topics:                                                            │
+│     checks.scheduled │ checks.started │ checks.completed             │
+│     alerts.triggered │ alerts.resolved │ rum.events.ingested         │
+│   Transactional outbox (ADR 0010): writers append DomainEvent rows   │
+│   in their DB tx; the leader-only publisher ships them to Kafka      │
+│   with at-least-once delivery. Consumers are idempotent at the      │
+│   application layer (CheckRun.status claim, RumEvent id dedupe).    │
 └───────┬──────────────────────────────────────────────────────────────┘
         │
 ┌───────▼──────────────────────────────────────────────────────────────┐
-│                            data plane                               │
-│ apps/runner         - Playwright-based check executor                │
-│ apps/rum-collector  - Fastify RUM beacon intake                      │
-│ packages/rum-sdk    - tree-shakeable browser SDK (web-vitals, errors)│
+│                           DATA PLANE                                │
+│ apps/runner         - thin wrapper around @insightview/synthetic-kit │
+│ synthetic-kit       - Playwright, Web Vitals (bundled IIFE),         │
+│                       Nav Timing fallback, CDP metrics,              │
+│                       CDN cache hit/miss, retry-with-flaky,          │
+│                       browser recycling, CDP network emulation,      │
+│                       6 auth strategies, 5 network profiles,         │
+│                       6 exporters, OTel traceparent injection        │
+│ apps/rum-collector  - Fastify RUM intake + replay + geoip-lite       │
+│ packages/rum-sdk    - browser SDK (web/errors/nav/replay/interacts)  │
+│ packages/rum-react  - <RumProvider> + useRumClient + useTrackRoute   │
+│ packages/rum-vue    - Vue 3 plugin                                   │
+│ packages/rum-mobile - React Native / Swift / Kotlin hosts            │
+│ infra/cloudflare-worker - edge RUM collector (330+ PoPs, cf-geo)     │
 └───────┬──────────────────────────────────────────────────────────────┘
         │
 ┌───────▼──────────────────────────────────────────────────────────────┐
-│                          storage layer                              │
-│ PostgreSQL via Prisma  - checks, runs, results, alerts, RUM events   │
-│ Redis                  - queues, leader-election lease               │
-│ Prometheus Pushgateway - mirrored synthetic_monitoring_* metrics     │
-│ MinIO (S3-compatible)  - screenshots & trace artifacts               │
+│                          STORAGE LAYER                              │
+│ PostgreSQL via Prisma  - 15 tables:                                 │
+│   Check, CheckRun, CheckResult,                                     │
+│   AlertRule, AlertIncident, NotificationChannel,                    │
+│   RumSession, RumEvent, RumReplayChunk, SourceMap,                  │
+│   WatchdogHeartbeat, MonitorDeployment,                             │
+│   DomainEvent (outbox), ApiToken, AuditLog                          │
+│ Redis                  - queues (BullMQ), leader-election lease     │
+│ Kafka (opt)            - event log with per-key ordering            │
+│ Prometheus Pushgateway - synthetic_monitoring_* metrics             │
+│ MinIO / S3             - screenshots, traces, replay chunks         │
+├──────────────────────────────────────────────────────────────────────┤
+│                      OBSERVABILITY LAYER (ADR 0012)                 │
+│ pino (logs) │ prom-client (metrics) │ OpenTelemetry (traces)         │
+│ Grafana dashboards (synthetic.json, rum.json with overlay panel)    │
+│ /metrics │ /healthz │ /readyz │ /v1/status.json                     │
+│ OTLP/HTTP exporter → Tempo / Jaeger / Grafana Cloud                 │
+│ W3C traceparent propagation through event bus and synthetic runs   │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Patterns in play
 
-The MVP applies a deliberately short list of design patterns where
-they earn their keep.
+The platform applies a deliberately short list of design patterns
+where they earn their keep.
 
-- **Hexagonal / ports-and-adapters** at four seams:
+- **Hexagonal / ports-and-adapters** at six seams:
   1. **Event bus** (`packages/event-bus`) — any message producer or
-     consumer talks to the `EventBus` interface, not BullMQ directly.
-     See ADR 0002.
+     consumer talks to the `EventBus` interface, not BullMQ OR Kafka
+     directly. The factory selects between the two impls per
+     `BUS_BACKEND` env. ADR 0002 defined the interface; ADR 0010
+     delivered the Kafka swap without touching any service code.
   2. **Repositories** (`packages/db/src/repositories/*`) — every
      service reads/writes Postgres via tenant-scoped functions, not
      raw Prisma calls scattered in route handlers.
   3. **Notification channels** — alert dispatch goes through a
      strategy registry, so adding a new channel (PagerDuty, email)
      is one file.
-  4. **Alert strategies** — threshold, consecutive-failures, and
-     composite evaluators all implement the same `Strategy` interface
-     so future ML / anomaly detection can slot in without touching
-     the evaluator.
+  4. **Alert strategies** — all 5 strategies (threshold, consecutive,
+     composite, anomaly z-score, rum-metric) implement the same
+     `Strategy` interface. ADR 0011 shows how future ML strategies
+     (Isolation Forest, Prophet) plug in without touching the
+     evaluator.
+  5. **Auth strategies** (`packages/synthetic-kit/src/auth/`) — 6
+     interchangeable implementations sharing a single `AuthStrategy`
+     interface.
+  6. **Exporters** (`packages/synthetic-kit/src/exporters/`) — 6
+     sinks behind one `Exporter` interface.
 
 - **Strategy pattern**: `apps/alerting/src/strategies/index.ts`
-  registers impl per `AlertStrategy` enum value. Composite strategies
-  delegate to other registered strategies, proving the interface
-  supports composition.
+  registers impls per `AlertStrategy` enum value. Composite
+  strategies delegate to other registered strategies, proving
+  the interface supports composition. See
+  [ADR 0011](adr/0011-anomaly-detection-strategy.md).
 
 - **Factory pattern**: `apps/alerting/src/channels/index.ts` and
   `packages/event-bus/src/factory.ts` hide implementation choice
@@ -195,23 +248,42 @@ they earn their keep.
 - IIFE bundle produced by esbuild — loaded by the test-site via a
   `<script>` tag.
 - Auto-instruments Web Vitals (`onCLS`, `onFCP`, `onINP`, `onLCP`,
-  `onTTFB`), JS errors, and navigation timing.
+  `onTTFB`), JS errors, navigation timing, **click + route-change
+  interactions**, and **optional rrweb session replay**.
 - Batches 20 events or 5 seconds of events.
 - Flushes on `visibilitychange`/`pagehide` via `navigator.sendBeacon`.
 - Session stitching via `sessionStorage` UUID.
 
+### packages/rum-react, rum-vue, rum-mobile
+
+- **`@insightview/rum-react`** — `<RumProvider>` + `useRumClient()`
+  + `useTrackRoute()`. Module-level singleton so components outside
+  the provider get a safe no-op client.
+- **`@insightview/rum-vue`** — Vue 3 plugin with `app.use()`,
+  `inject("rum")`, and an auto-hook into `config.errorHandler`.
+- **`@insightview/rum-mobile`** — runtime-agnostic TypeScript SDK
+  that compiles for React Native and embeds as a module inside
+  Swift/Kotlin hosts via the `NativeHost` interface. Same wire
+  format as the browser SDK so the same rum-collector accepts
+  mobile beacons.
+
 ### apps/dashboard (Vite + React, port 5173)
 
 - Four pages: Checks, Runs, Alerts, RUM.
+- Plus the **public status page** at `/v1/status/*` (rendered
+  server-side by the API, dependency-free HTML).
 - Talks to the API via a thin fetch wrapper (`src/api/client.ts`);
   no TanStack Query because the pages are read-mostly and the extra
   dependency isn't earning its keep at MVP scale.
 
-### apps/action-dispatcher (CLI)
+### apps/action-dispatcher (CLI, 6 commands)
 
-- `insightview run|deploy|validate|status|legacy-run` — the command
-  pattern behind the composite `action.yml`.
-- Uses the same fetch wrapper the dashboard uses.
+- `insightview run|deploy|validate|status|native-run|legacy-run`.
+- `status` supports `--fail-on-degrade`, `--window N`,
+  `--min-success-ratio F` for PR deploy gates. Writes
+  `latest_status` and `success_ratio` as GitHub Action step outputs.
+- `native-run` executes monitors directly via
+  `@insightview/synthetic-kit` without any platform API.
 
 ## Domain model (see packages/db/prisma/schema.prisma)
 
@@ -223,10 +295,15 @@ they earn their keep.
 | AlertRule           | Strategy + expression mapping check results to incidents     |
 | AlertIncident       | Fired alert, lifecycled by the evaluator (FIRING → RESOLVED)  |
 | NotificationChannel | Destination for incidents (Slack, webhook, stdout)            |
-| RumSession          | Browser session upserted on first event                       |
+| RumSession          | Browser session upserted on first event (+ geo country)       |
 | RumEvent            | Individual RUM signal (web vital, error, navigation, custom)  |
+| RumReplayChunk      | Sequenced rrweb event batches for session replay              |
+| SourceMap           | Uploaded source maps for stack deobfuscation                  |
 | WatchdogHeartbeat   | Leader lease + liveness for dead-man's-switch                 |
 | MonitorDeployment   | Audit trail for monitors-as-code pushes                       |
+| DomainEvent         | Transactional outbox (Kafka publisher reads unpublished rows) |
+| ApiToken            | Bearer tokens (SHA-256 hashed + role + scopes + TTL)          |
+| AuditLog            | Generic audit log for every mutating request                  |
 
 Every table carries `tenantId String @default("default")` with an
 index so that future multi-tenancy is an API layer change, not a
@@ -234,36 +311,149 @@ schema migration.
 
 ## Sequence: synthetic run
 
-1. Scheduler leader reconciles `Check { enabled: true }` into BullMQ
-   repeatable jobs via `RepeatingJobScheduler.upsertSchedule`.
-2. BullMQ emits a `CheckScheduled` envelope on `checks.scheduled`.
-3. Runner worker consumes the envelope, allocates a `CheckRun(QUEUED)`
-   with a fresh `runId`, then atomically transitions to `RUNNING` via
-   `markRunStarted`. Duplicate deliveries fail that transition and
-   are dropped.
-4. Runner launches Chromium, navigates, collects Web Vitals and
-   perf timings, runs assertions, captures a screenshot.
-5. Runner writes a `CheckResult` row, pushes metrics to Pushgateway,
-   uploads the screenshot to MinIO, then transitions the run to
-   `PASSED | FAILED | ERROR | TIMEOUT` and publishes `CheckCompleted`.
-6. Alerting service consumes `CheckCompleted`, evaluates every
-   matching rule via the strategy registry, opens incidents, and
-   dispatches notifications through the channel registry.
+1. Scheduler leader reconciles `Check { enabled: true }` into the
+   bus scheduler via `RepeatingJobScheduler.upsertSchedule`.
+   BullMQ mode uses repeatable jobs; Kafka mode uses in-process
+   `node-cron` in `KafkaScheduler`.
+2. On each cron fire the scheduler emits a `CheckScheduled`
+   envelope on `checks.scheduled`.
+3. Runner worker consumes the envelope, allocates a
+   `CheckRun(QUEUED)` with a fresh `runId`, then atomically
+   transitions to `RUNNING` via `markRunStarted`. Duplicate
+   deliveries fail that transition and are dropped (this is the
+   application-layer idempotency that makes at-least-once
+   delivery safe under either backend).
+4. Runner delegates to `@insightview/synthetic-kit runCheck`
+   which launches Chromium, sets `bypassCSP`, installs the
+   web-vitals IIFE, runs the auth strategy, configures the
+   network profile, **injects OpenTelemetry traceparent headers
+   onto the BrowserContext** (via `context.setExtraHTTPHeaders`),
+   navigates, forces `visibilitychange → hidden`, collects
+   metrics, classifies the CDN cache, runs assertions, captures
+   a screenshot, retries transient failures with `flaky: true`.
+5. Runner writes one `CheckResult` row per step, pushes metrics
+   to Pushgateway, uploads artifacts to MinIO, then transitions
+   the run to `PASSED | FAILED | ERROR | TIMEOUT` and publishes
+   `CheckCompleted`. Downstream services (alerting, dashboard)
+   read from the same distributed trace because the traceparent
+   propagated through the event bus envelope headers.
+6. Alerting service consumes `CheckCompleted`, loads enabled
+   rules for the check, **pre-populates historical samples and
+   RUM aggregates when an ANOMALY_DETECTION or RUM_METRIC rule
+   is present**, evaluates each rule via the strategy registry,
+   opens incidents (dedupe by `(ruleId, checkId, severity)`),
+   and dispatches notifications through the channel registry.
+
+## Sequence: Kafka + transactional outbox (ADR 0010)
+
+When `BUS_BACKEND=kafka`:
+
+1. A writer (API route, scheduler loop, etc.) calls
+   `appendDomainEvent(ctx, input, tx)` inside its existing Prisma
+   transaction. The row lands in `DomainEvent` with
+   `publishedAt = NULL` in the same unit of work as the business
+   mutation. Either both commit or both roll back — no dual-write
+   consistency problem.
+2. The `OutboxPublisher` loop in the leader-elected scheduler
+   polls `listUnpublishedEvents(batchSize)` every 1.5s.
+3. For each row it calls `bus.publish(topic, envelope, { dedupeKey })`
+   on the Kafka bus. The dedupe key becomes the Kafka message key
+   so same-resource messages always land in the same partition
+   (per-key ordering guarantee).
+4. Successful publishes are batch-flipped to `publishedAt = NOW()`
+   via `markPublished(ids)`. Unmarked rows retry on the next tick.
+5. A periodic reaper (`reapOldEvents`, default 15-min interval,
+   7-day retention) deletes rows whose `publishedAt` is older than
+   the retention window. The mark-and-reap pattern avoids Postgres
+   MVCC bloat that delete-on-publish would cause.
+6. Consumers (runner, alerting, dashboard) receive at-least-once
+   delivery. Application-layer idempotency (CheckRun.status claim,
+   RumEvent id dedupe) makes duplicates safe.
+
+## Sequence: anomaly detection (ADR 0011)
+
+1. `CheckCompleted` arrives at the alerting service for check `C`.
+2. `evaluateCompletion` loads enabled rules for `C`. One is
+   `ANOMALY_DETECTION` with `expression.metric = "LCP"`.
+3. The evaluator detects the anomaly requirement (`needsAnomaly`
+   flag) and pre-populates `historicalValues` by walking the last
+   20 `CheckRun` rows, joining to their `CheckResult` children,
+   and harvesting each web-vital measurement plus a synthetic
+   `duration` bucket.
+4. `AnomalyDetectionStrategy.evaluate` reads
+   `historicalValues.LCP` (no DB access), computes the rolling
+   mean + Bessel-corrected stddev, and compares the current
+   observation's z-score to the configured threshold in the
+   configured direction.
+5. If `|z| >= threshold`, `Decision.shouldFire = true` with a
+   reason like `"LCP=4500 z=4.23 (mean=1200 σ=780, threshold=±3)"`.
+   The evaluator opens an `AlertIncident` and dispatches via the
+   channel registry.
+6. On the next PASS within bounds the same evaluator pass returns
+   `shouldResolve = true`, flipping the incident to `RESOLVED`.
+
+## Sequence: OpenTelemetry trace correlation
+
+1. The synthetic-kit calls `injectTraceHeaders({})` from
+   `@insightview/observability`. If OTel is initialized and a
+   span context is active, it returns
+   `{ traceparent: "00-...-01", tracestate: "..." }`.
+2. `context.setExtraHTTPHeaders(traceHeaders)` applies these to
+   every outgoing request the BrowserContext makes.
+3. Chromium navigates to the target URL with `traceparent` in
+   the request headers. The target's OTel-instrumented backend
+   continues the same trace — the synthetic run is the root span
+   and backend RPCs appear as children.
+4. If `OTEL_EXPORTER_OTLP_ENDPOINT` is set, every service's spans
+   batch-export to the OTLP collector. If unset, spans are still
+   created and propagated in-process but dropped on the exporter
+   boundary — no runtime overhead.
+5. An on-call engineer debugging a synthetic failure can click
+   through from the `ResultEnvelope.githubContext.runId` → trace
+   id → Tempo/Jaeger → the exact backend span that was slow.
 
 ## Sequence: RUM event
 
 1. Browser page loads `insightview-rum.iife.js`.
 2. The SDK runs `init(...)` which (a) reads/creates a sessionStorage
-   UUID, (b) installs auto-instruments, (c) starts the batching
-   buffer.
+   UUID, (b) installs auto-instruments including click + route-
+   change interactions, (c) starts the batching buffer. Replay is
+   an opt-in instrument that lazy-imports rrweb.
 3. Auto-instruments push events into the buffer. Buffer flushes on
    the earlier of 20 events, 5s elapsed, or page visibility hidden.
 4. Transport calls `navigator.sendBeacon` with a JSON batch to
-   `rum-collector:4400/v1/events` (with a `fetch(keepalive)` fallback).
-5. The collector validates via the shared Zod schema, upserts the
-   `RumSession` and inserts `RumEvent` rows.
-6. Dashboard queries surface the events via `/v1/rum/events` and
-   `/v1/rum/summary`.
+   either the origin collector or the **Cloudflare Worker edge**
+   (`infra/cloudflare-worker`), which enriches with cf-geo and
+   forwards to the origin.
+5. The origin collector validates via the shared Zod schema,
+   **resolves country/region/city via bundled MaxMind GeoLite2**,
+   upserts the `RumSession`, and inserts `RumEvent` rows with
+   `attributes.geo` stamped on each event.
+6. For session replay, separate rrweb chunks POST to
+   `/v1/replay` and land in `RumReplayChunk` keyed by
+   `(sessionId, sequence)`.
+7. Dashboard queries surface the events via `/v1/rum/events`,
+   `/v1/rum/summary`, and the Grafana dashboard's
+   synthetic-vs-RUM overlay panel.
+
+## Sequence: auth + audit log (ADR 0012)
+
+1. Request arrives with `Authorization: Bearer <token>`.
+2. The tenant plugin decides the three-mode branch:
+   - Static `API_TOKEN` match → admin.
+   - Token starts with `iv_` → `verifyToken` SHA-256 hashes it
+     and queries the `ApiToken` table. Revoked or expired rows
+     return 401. Valid rows populate `req.auth = { tokenId,
+     role, scopes }`. The row's `lastUsedAt` is bumped async.
+   - Neither → anonymous read-only (or 401 if a static token is
+     configured and nothing matches).
+3. Route handlers protected by `{ preHandler: requireRole("admin") }`
+   check `req.auth.role` against the hierarchy
+   `read < write < admin` and throw 403 if insufficient.
+4. Mutating handlers call `recordAudit(ctx, input)` which inserts
+   an `AuditLog` row with `(actor, action, resource, resourceId,
+   metadata)`. The audit table is queryable via
+   `GET /v1/audit?resource=...&resourceId=...`.
 
 ## Where the gaps are still open (and what will close them)
 
