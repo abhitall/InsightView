@@ -165,6 +165,28 @@ export async function runCheck(
     // runs on every page created afterward, BEFORE any page scripts.
     await installWebVitalsCollector(context);
 
+    // OpenTelemetry trace propagation: inject W3C traceparent +
+    // tracestate headers on every outbound request so the target's
+    // backend can continue the same trace. The runner is the
+    // "synthetic user" root of the trace; downstream services
+    // appear as child spans correlated by trace id.
+    const traceHeaders: Record<string, string> = {};
+    try {
+      // Lazy-resolve observability's injectTraceHeaders so
+      // synthetic-kit doesn't hard-depend on OTel.
+      const { injectTraceHeaders } = await import(
+        "@insightview/observability"
+      ).catch(() => ({ injectTraceHeaders: null }) as any);
+      if (typeof injectTraceHeaders === "function") {
+        injectTraceHeaders(traceHeaders);
+      }
+    } catch {
+      /* tracing optional */
+    }
+    if (Object.keys(traceHeaders).length > 0) {
+      await context.setExtraHTTPHeaders(traceHeaders);
+    }
+
     const effectiveSteps = spec.steps ?? [
       { name: "navigate", url: spec.targetUrl },
     ];

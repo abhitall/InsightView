@@ -6,6 +6,7 @@ import {
   type RumEventInput,
 } from "@insightview/db";
 import { defaultTenant, RumEventType } from "@insightview/core";
+import { resolveGeo } from "../geo.js";
 
 export async function registerEventRoutes(
   app: FastifyInstance,
@@ -23,12 +24,13 @@ export async function registerEventRoutes(
 
     const ctx = defaultTenant("rum");
     const userAgent = req.headers["user-agent"] ?? "unknown";
+    const geo = resolveGeo(req.headers, req.ip);
 
     await upsertSession(ctx, {
       id: batch.sessionId,
       siteId: batch.siteId,
       userAgent: String(userAgent),
-      country: null,
+      country: geo.country,
       deviceCategory: classifyDevice(String(userAgent)),
       pageCount: 1,
     });
@@ -43,7 +45,14 @@ export async function registerEventRoutes(
       rating: ev.rating,
       url: ev.url,
       occurredAt: new Date(ev.occurredAt),
-      attributes: ev.attributes ?? {},
+      attributes: {
+        ...(ev.attributes ?? {}),
+        geo: {
+          country: geo.country,
+          region: geo.region,
+          city: geo.city,
+        },
+      },
     }));
 
     const count = await insertRumEvents(ctx, rows);

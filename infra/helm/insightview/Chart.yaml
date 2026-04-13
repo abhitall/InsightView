@@ -1,0 +1,11 @@
+apiVersion: v2
+name: insightview
+description: >-
+  InsightView monitoring platform — synthetic checks, alerting,
+  RUM collector, and dashboard. Optional Kafka backend selected
+  via values.eventBus.backend=kafka.
+type: application
+version: 0.2.0
+appVersion: "2.0.0-alpha.1"
+maintainers:
+  - name: InsightView Contributors

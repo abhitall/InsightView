@@ -12,6 +12,9 @@ import { registerMonitorRoutes } from "./routes/monitors.js";
 import { registerMetricsRoute } from "./routes/metrics.js";
 import { registerIngestRoutes } from "./routes/ingest.js";
 import { registerSourceMapRoutes } from "./routes/sourceMaps.js";
+import { registerTokenRoutes } from "./routes/tokens.js";
+import { registerAuditRoutes } from "./routes/audit.js";
+import { registerStatusPageRoutes } from "./routes/statusPage.js";
 import { tenantPlugin } from "./plugins/tenant.js";
 import { createRegistry } from "@insightview/observability";
 
@@ -71,6 +74,9 @@ export async function buildServer(): Promise<FastifyInstance> {
   await registerMonitorRoutes(app);
   await registerIngestRoutes(app);
   await registerSourceMapRoutes(app);
+  await registerTokenRoutes(app);
+  await registerAuditRoutes(app);
+  await registerStatusPageRoutes(app);
 
   return app;
 }

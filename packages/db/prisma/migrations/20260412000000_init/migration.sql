@@ -8,7 +8,7 @@ CREATE TYPE "CheckRunStatus" AS ENUM ('QUEUED', 'RUNNING', 'PASSED', 'FAILED', '
 CREATE TYPE "TriggerSource" AS ENUM ('SCHEDULE', 'MANUAL', 'API', 'ACTION');
 
 -- CreateEnum
-CREATE TYPE "AlertStrategy" AS ENUM ('THRESHOLD', 'CONSECUTIVE_FAILURES', 'COMPOSITE');
+CREATE TYPE "AlertStrategy" AS ENUM ('THRESHOLD', 'CONSECUTIVE_FAILURES', 'COMPOSITE', 'ANOMALY_DETECTION', 'RUM_METRIC');
 
 -- CreateEnum
 CREATE TYPE "Severity" AS ENUM ('INFO', 'WARNING', 'CRITICAL');
@@ -217,6 +217,50 @@ CREATE TABLE "RumReplayChunk" (
     CONSTRAINT "RumReplayChunk_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "DomainEvent" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL DEFAULT 'default',
+    "topic" TEXT NOT NULL,
+    "type" TEXT NOT NULL,
+    "payload" JSONB NOT NULL,
+    "traceId" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "publishedAt" TIMESTAMP(3),
+
+    CONSTRAINT "DomainEvent_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ApiToken" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL DEFAULT 'default',
+    "name" TEXT NOT NULL,
+    "tokenHash" TEXT NOT NULL,
+    "role" TEXT NOT NULL DEFAULT 'read',
+    "scopes" TEXT[] DEFAULT ARRAY[]::TEXT[],
+    "expiresAt" TIMESTAMP(3),
+    "revokedAt" TIMESTAMP(3),
+    "lastUsedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "ApiToken_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "AuditLog" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL DEFAULT 'default',
+    "actor" TEXT NOT NULL,
+    "action" TEXT NOT NULL,
+    "resource" TEXT NOT NULL,
+    "resourceId" TEXT,
+    "metadata" JSONB NOT NULL DEFAULT '{}',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "AuditLog_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE INDEX "Check_tenantId_enabled_idx" ON "Check"("tenantId", "enabled");
 
@@ -279,6 +323,24 @@ CREATE INDEX "RumReplayChunk_tenantId_sessionId_sequence_idx" ON "RumReplayChunk
 
 -- CreateIndex
 CREATE INDEX "RumReplayChunk_tenantId_siteId_createdAt_idx" ON "RumReplayChunk"("tenantId", "siteId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "DomainEvent_publishedAt_createdAt_idx" ON "DomainEvent"("publishedAt", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "DomainEvent_topic_createdAt_idx" ON "DomainEvent"("topic", "createdAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ApiToken_tokenHash_key" ON "ApiToken"("tokenHash");
+
+-- CreateIndex
+CREATE INDEX "ApiToken_tenantId_revokedAt_idx" ON "ApiToken"("tenantId", "revokedAt");
+
+-- CreateIndex
+CREATE INDEX "AuditLog_tenantId_createdAt_idx" ON "AuditLog"("tenantId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "AuditLog_resource_resourceId_idx" ON "AuditLog"("resource", "resourceId");
 
 -- AddForeignKey
 ALTER TABLE "CheckRun" ADD CONSTRAINT "CheckRun_checkId_fkey" FOREIGN KEY ("checkId") REFERENCES "Check"("id") ON DELETE CASCADE ON UPDATE CASCADE;

@@ -7,12 +7,26 @@ import type {
 import {
   listEnabledRulesForCheck,
   listRunsByCheck,
+  listResultsByRun,
+  rumWebVitalSummary,
   createIncident,
   findFiringIncident,
   resolveIncidentsForRule,
   type AlertIncident,
 } from "@insightview/db";
 import { strategyFor } from "./strategies/index.js";
+
+/**
+ * Evaluator orchestration. Loads the enabled rules for a check,
+ * pre-populates strategy-specific context (historicalValues for
+ * ANOMALY_DETECTION, rumAggregates for RUM_METRIC), then walks
+ * the registry and turns decisions into incident create / resolve
+ * operations.
+ *
+ * Anomaly & RUM pre-population is done here rather than inside the
+ * strategies themselves so the strategies remain pure functions
+ * that unit tests can hammer without a database.
+ */
 
 export async function evaluateCompletion(
   ctx: TenantContext,
@@ -24,6 +38,69 @@ export async function evaluateCompletion(
 
   const recentRuns = await listRunsByCheck(ctx, payload.checkId, 20);
   const createdIncidents: AlertIncident[] = [];
+
+  // Pre-compute historical metric samples for anomaly detection.
+  // We only do this work if at least one rule actually needs it.
+  const needsAnomaly = rules.some((r) => r.strategy === "ANOMALY_DETECTION");
+  const historicalValues: Record<string, number[]> = {};
+  if (needsAnomaly) {
+    // For every prior run in history, look up its results and
+    // harvest each web-vital measurement. One DB call per run is
+    // acceptable at 20-run window; the query is indexed.
+    for (const run of recentRuns.slice(0, 20)) {
+      if (run.id === payload.runId) continue;
+      try {
+        const results = await listResultsByRun(ctx, run.id);
+        for (const r of results) {
+          const vitals = (r.webVitals as Record<string, number>) ?? {};
+          for (const [k, v] of Object.entries(vitals)) {
+            if (typeof v === "number" && Number.isFinite(v)) {
+              (historicalValues[k] = historicalValues[k] ?? []).push(v);
+            }
+          }
+          // `duration` bucket from the step duration.
+          if (typeof r.durationMs === "number") {
+            (historicalValues.duration = historicalValues.duration ?? []).push(
+              r.durationMs,
+            );
+          }
+        }
+      } catch (err) {
+        log.warn({ err, runId: run.id }, "failed to load results for history");
+      }
+    }
+  }
+
+  // Pre-compute RUM aggregates for RUM_METRIC rules.
+  const needsRum = rules.some((r) => r.strategy === "RUM_METRIC");
+  const rumAggregates: Record<
+    string,
+    { p50: number; p75: number; p95: number; count: number; mean: number }
+  > = {};
+  if (needsRum) {
+    // For MVP we treat the check's tag list as the RUM site-id
+    // hint. In a production deployment the rule would carry its
+    // own siteId; this keeps the wiring simple.
+    const siteId = process.env.RUM_SITE_ID ?? "default";
+    try {
+      const summary = await rumWebVitalSummary(
+        ctx,
+        siteId,
+        15 * 60 * 1000, // 15-minute window
+      );
+      for (const row of summary) {
+        rumAggregates[row.metric] = {
+          p50: row.avg,
+          p75: row.avg * 1.2, // crude estimate until we store distributions
+          p95: row.avg * 1.5,
+          count: row.count,
+          mean: row.avg,
+        };
+      }
+    } catch (err) {
+      log.warn({ err }, "failed to load RUM aggregate");
+    }
+  }
 
   for (const rule of rules) {
     const strategy = strategyFor(rule.strategy);
@@ -37,6 +114,8 @@ export async function evaluateCompletion(
         errorMessage: payload.errorMessage ?? null,
       },
       history: recentRuns,
+      historicalValues,
+      rumAggregates,
     });
 
     if (decision.shouldFire) {

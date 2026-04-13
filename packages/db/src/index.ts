@@ -9,6 +9,9 @@ export * from "./repositories/channels.js";
 export * from "./repositories/deployments.js";
 export * from "./repositories/sourceMaps.js";
 export * from "./repositories/replay.js";
+export * from "./repositories/outbox.js";
+export * from "./repositories/apiTokens.js";
+export * from "./repositories/audit.js";
 export {
   Prisma,
   PrismaClient,
@@ -26,4 +29,7 @@ export type {
   MonitorDeployment,
   SourceMap,
   RumReplayChunk,
+  DomainEvent,
+  ApiToken,
+  AuditLog,
 } from "./generated/client/index.js";

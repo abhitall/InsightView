@@ -6,6 +6,7 @@ import { startLeaderLoop } from "./leaderElection.js";
 import { startScheduleLoop } from "./scheduleLoop.js";
 import { startWatchdog } from "./watchdog.js";
 import { startTimeoutReaper } from "./timeoutReaper.js";
+import { startOutboxPublisher } from "./outboxPublisher.js";
 
 const log = createLogger({ service: "scheduler" });
 
@@ -50,11 +51,26 @@ async function main() {
     isLeader: () => isLeader,
   });
 
+  // Outbox publisher runs ONLY when Kafka is selected — when the
+  // backend is BullMQ the schedule loop and the API publish
+  // directly since BullMQ's guarantees are already enough.
+  const useOutbox =
+    (process.env.BUS_BACKEND ?? "").toLowerCase() === "kafka" ||
+    !!process.env.KAFKA_BROKERS;
+  const stopOutbox = useOutbox
+    ? startOutboxPublisher({
+        bus,
+        log,
+        isLeader: () => isLeader,
+      })
+    : () => {};
+
   const shutdown = async () => {
     log.info("shutdown requested");
     stopReaper();
     stopWatchdog();
     stopSchedule();
+    stopOutbox();
     stopLeader();
     await app.close();
     await bus.close();

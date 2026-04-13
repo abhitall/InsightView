@@ -33,6 +33,8 @@ export const AlertStrategy = {
   THRESHOLD: "THRESHOLD",
   CONSECUTIVE_FAILURES: "CONSECUTIVE_FAILURES",
   COMPOSITE: "COMPOSITE",
+  ANOMALY_DETECTION: "ANOMALY_DETECTION",
+  RUM_METRIC: "RUM_METRIC",
 } as const;
 export type AlertStrategy = (typeof AlertStrategy)[keyof typeof AlertStrategy];
 

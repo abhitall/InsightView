@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "insightview.fullname" . }}-runner
+  labels:
+    {{- include "insightview.labels" . | nindent 4 }}
+    app.kubernetes.io/component: runner
+spec:
+  replicas: {{ .Values.runner.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: insightview
+      app.kubernetes.io/component: runner
+  template:
+    metadata:
+      labels:
+        {{- include "insightview.labels" . | nindent 8 }}
+        app.kubernetes.io/component: runner
+    spec:
+      containers:
+        - name: runner
+          image: "{{ .Values.image.repository }}-runner:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["pnpm", "--filter", "@insightview/runner", "run", "start"]
+          env:
+            {{- include "insightview.env" . | nindent 12 }}
+            - name: PORT
+              value: "4200"
+            - name: RUNNER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          ports:
+            - name: http
+              containerPort: 4200
+          livenessProbe:
+            httpGet: { path: /healthz, port: 4200 }
+            initialDelaySeconds: 15
+          resources:
+            {{- toYaml .Values.runner.resources | nindent 12 }}

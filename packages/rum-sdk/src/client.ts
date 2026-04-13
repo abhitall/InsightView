@@ -4,6 +4,7 @@ import { installErrorHandlers } from "./instruments/errors.js";
 import { installNavigation } from "./instruments/navigation.js";
 import { installResources } from "./instruments/resources.js";
 import { installReplay, type ReplayHandle } from "./instruments/replay.js";
+import { installInteractionTracking } from "./instruments/interactions.js";
 import { Buffer } from "./buffer.js";
 import { sendBatch } from "./transport.js";
 
@@ -19,6 +20,7 @@ export interface InitOptions {
     resources?: boolean;
     navigation?: boolean;
     replay?: boolean;
+    interactions?: boolean;
   };
   /** Optional separate replay endpoint (defaults to endpoint + /replay). */
   replayEndpoint?: string;
@@ -103,6 +105,7 @@ export function init(opts: InitOptions): RumClient {
   if (auto.errors !== false) installErrorHandlers(push);
   if (auto.navigation !== false) installNavigation(push);
   if (auto.resources === true) installResources(push);
+  if (auto.interactions !== false) installInteractionTracking(push);
   let replayHandle: ReplayHandle | undefined;
   if (auto.replay === true) {
     replayHandle = installReplay(

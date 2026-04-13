@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "insightview.fullname" . }}-scheduler
+  labels:
+    {{- include "insightview.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scheduler
+spec:
+  replicas: {{ .Values.scheduler.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: insightview
+      app.kubernetes.io/component: scheduler
+  template:
+    metadata:
+      labels:
+        {{- include "insightview.labels" . | nindent 8 }}
+        app.kubernetes.io/component: scheduler
+    spec:
+      containers:
+        - name: scheduler
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["pnpm", "--filter", "@insightview/scheduler", "run", "start"]
+          env:
+            {{- include "insightview.env" . | nindent 12 }}
+            - name: PORT
+              value: "4100"
+          ports:
+            - name: http
+              containerPort: 4100
+          livenessProbe:
+            httpGet: { path: /healthz, port: 4100 }
+            initialDelaySeconds: 10
+          resources:
+            {{- toYaml .Values.scheduler.resources | nindent 12 }}

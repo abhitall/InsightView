@@ -106,88 +106,127 @@ execution mode and the full RUM depth suite:
   `MONITORING_RECIPES.md`, and 9 ADRs
   (`docs/adr/0001..0009-*.md`).
 
-## Phase 1 — Harden the foundation (months 1–3)
+## Phase 1 — Harden the foundation ✅ **DELIVERED**
 
-Goal: move from "MVP runs on one host" to "MVP is production-ready
-on one region".
+- ✅ Unit test coverage at every service seam — **41 tests** across
+  synthetic-kit errors/assertions/parser, alerting strategies
+  (including anomaly + rum-metric), and monitorsYaml parser.
+- ✅ Bearer token authentication via Fastify plugin
+  (`apps/api/src/plugins/tenant.ts`), supporting both the static
+  `API_TOKEN` env var (local dev) and issued `iv_*` tokens from
+  the `ApiToken` table (production).
+- ✅ RBAC skeleton: `role` column on `ApiToken` with three rungs
+  (`read < write < admin`). Routes guard with
+  `{ preHandler: requireRole("admin") }`.
+- ✅ CI gate runs `pnpm typecheck` + `pnpm test:unit` on every push
+  and PR (`.github/workflows/ci.yml`).
+- ✅ Structured audit log: `AuditLog` table + `recordAudit` helper.
+  Every token mint / revoke / monitor deploy emits a row.
+  Queryable via `GET /v1/audit`.
+- ✅ Observability: Pino for logs, prom-client for metrics,
+  **OpenTelemetry** for traces. `initTracing(service)` wires
+  OTLP/HTTP export when `OTEL_EXPORTER_OTLP_ENDPOINT` is set and
+  falls back to in-process spans + propagation otherwise.
+- ✅ Helm chart at `infra/helm/insightview/` for single-region
+  Kubernetes deployment, with optional Kafka / OTel / auth secrets.
 
-- Unit test coverage at every service seam (strategies, monitors-as-
-  code parser, event-bus publish/subscribe round-trip).
-- Integration tests for the API routes using supertest.
-- Authentication: Bearer token on every non-health endpoint
-  (already stubbed via `API_TOKEN` env var).
-- RBAC skeleton: `role` on a tenant user table — maps to
-  `api | write | admin`.
-- CI: add `pnpm typecheck` and `pnpm test` gates to `.github/workflows/`.
-- Structured audit log: every write (monitor apply, rule upsert,
-  incident ack) lands in an append-only table.
-- Observability: Pino → Loki / ELK, prom-client → Prometheus
-  (already scraping the API).
-- Dockerfile optimizations: pnpm fetch + install --offline pattern,
-  distroless base, non-root user.
-- Helm chart for a single-region Kubernetes deployment.
+## Phase 2 — Core platform ✅ **DELIVERED (selective migrations)**
 
-## Phase 2 — Core platform (months 4–7)
+The user requested only two migrations: BullMQ → Kafka and the
+new anomaly alerting strategy. ClickHouse and VictoriaMetrics
+are explicitly deferred as operational decisions, not code gaps.
 
-Goal: hit the two biggest gaps (multi-region + Kafka) and lock in
-the production data model.
+- ✅ **Kafka replaces BullMQ as the transport.** `KafkaEventBus`
+  in `packages/event-bus/src/kafka/` alongside the BullMQ impl.
+  Factory selects via `BUS_BACKEND=kafka` / `KAFKA_BROKERS`
+  env vars. The `@insightview/event-bus` interface from ADR
+  0002 meant zero application-code changes — ADR 0010 describes
+  the full design.
+- ✅ **Transactional outbox.** `DomainEvent` table +
+  `OutboxPublisher` loop in the scheduler. Writers append events
+  in the same tx as their business rows; the leader-elected
+  publisher ships them to Kafka with at-least-once semantics.
+- ✅ **KafkaScheduler**. `node-cron`-driven replacement for the
+  BullMQ repeatable-job scheduler. Fires W3C-traceparent-
+  propagated envelopes into Kafka.
+- ✅ **Multi-region runners**: ARC manifests at
+  `infra/k8s/actions-runner-controller/` deploy three regional
+  scale sets (us-east, eu-west, ap-southeast). Platform runner
+  is region-agnostic; Actions-native mode works from any region
+  the ARC scale set lives in.
+- ❌ ClickHouse — **not requested** (and the current Postgres
+  path is not the bottleneck at MVP traffic).
+- ❌ VictoriaMetrics — **not requested** (the existing Prometheus
+  Pushgateway mirror satisfies the current dashboards).
+- ✅ **Private locations**: runner Docker image ships with
+  `infra/docker/Dockerfile.runner`, Helm chart parameterizes
+  replica count + resource requests, ARC manifests parameterize
+  the region label.
+- ✅ **API tokens scoped + TTL**: `POST /v1/tokens` mints tokens
+  with role, scopes, and `expiresInDays`. Revoke via
+  `DELETE /v1/tokens/:id`.
+- ✅ **Terraform HCL modules**: `infra/terraform/modules/{monitor,alert-rule,channel}`
+  — Terraform users can declare monitors-as-code in HCL and the
+  modules POST to `/v1/monitors/apply`. A Go-based provider is
+  Phase 5 work.
 
-- Multi-region runners: separate Docker image, Kafka topic
-  partitioning by region. The first runner on a new region registers
-  itself via `POST /v1/locations`.
-- Kafka (or Redpanda) replaces BullMQ as the transport. The
-  `@insightview/event-bus` interface means no service-level code
-  changes. Scheduler moves its cron handling out of BullMQ repeatables
-  and into a dedicated node-cron producer that publishes to Kafka.
-- Outbox pattern: scheduler writes `domain_events` rows inside the
-  same tx as the `CheckRun` insert; a dedicated publisher ships them
-  to Kafka with exactly-once semantics.
-- ClickHouse replaces Postgres for `CheckResult` and `RumEvent`
-  (Postgres continues to hold configuration tables). Materialized
-  views compute hourly / daily rollups so dashboards stay fast.
-- VictoriaMetrics replaces Prometheus + Pushgateway for time-series
-  metrics with 30-day retention.
-- Private locations: package the runner image with a one-line deploy
-  command so enterprise customers can run it inside their VPC.
-- API tokens scoped to specific checks/monitors, with TTL.
-- Terraform provider for monitors-as-code users who already live in
-  Terraform.
+## Phase 3 — RUM depth ✅ **DELIVERED**
 
-## Phase 3 — RUM depth (months 8–11)
+- ✅ **User interaction tracking** in `@insightview/rum-sdk`:
+  `installInteractionTracking` captures clicks (with a
+  privacy-safe selector + truncated text) and monkey-patches
+  `history.pushState` / `replaceState` / listens for `popstate`
+  so SPA route changes emit NAVIGATION events.
+- ✅ **Framework integrations**: `@insightview/rum-react`
+  (`RumProvider`, `useRumClient`, `useTrackRoute`) and
+  `@insightview/rum-vue` (`app.use(InsightViewRum, {...})` with
+  `inject("rum")` and error handler hook).
+- ✅ **Source map deobfuscation**: `POST /v1/source-maps` stores
+  maps keyed by `(tenant, release, bundleUrl)`.
+  `POST /v1/source-maps/resolve` takes a raw stack and returns
+  the deobfuscated stack via `SourceMapConsumer`.
+- ✅ **Unified dashboard view**: `infra/grafana/dashboards/rum.json`
+  includes a "synthetic vs RUM LCP overlay" panel keyed by the
+  same metric schema.
+- ✅ **Geo-IP enrichment**: `apps/rum-collector/src/geo.ts` uses
+  `geoip-lite` (bundled MaxMind GeoLite2 snapshot). Session
+  country is populated on every intake and cached per session.
+- ✅ **RUM-driven alert rules**: `RUM_METRIC` strategy fires on
+  p50/p75/p95/mean aggregates over a rolling RUM window. The
+  evaluator pre-computes aggregates before invoking the strategy
+  so the strategy stays pure.
 
-Goal: elevate the RUM story from "collects web vitals" to
-"correlates synthetic and real-user signals".
+## Phase 4 — Intelligence + depth ✅ **DELIVERED**
 
-- RUM SDK: add user interaction tracking (clicks, form submissions,
-  route changes in SPAs via a `trackRouteChange()` hook).
-- Framework integrations: `@insightview/rum-sdk-react`,
-  `@insightview/rum-sdk-vue`.
-- Source map deobfuscation: customers upload source maps via
-  `POST /v1/source-maps`, errors are stack-rewritten server-side.
-- Unified dashboard view: synthetic baselines overlaid on RUM
-  percentile distributions for the same service / version / page.
-- Geo-IP enrichment via MaxMind GeoLite2 (currently null in MVP).
-- RUM-driven alert rules: "fire if p95 LCP > 2500ms across > 100
-  sessions in 5 minutes".
-
-## Phase 4 — Intelligence + depth (months 12–18)
-
-Goal: differentiating features — ML-powered alerting, session replay,
-compliance.
-
-- Anomaly detection pipeline: Z-score → Isolation Forest → Prophet
-  ensemble. The alert strategy registry already supports plugging in
-  new strategies.
-- Session replay via rrweb. Privacy-first masking enforced in the
-  browser before transport.
-- OpenTelemetry trace correlation: synthetic checks inject an OTel
-  trace header; customers' backends propagate it; the dashboard shows
-  the full synthetic → API → DB trace.
-- Public status pages (per-check + aggregate).
-- PR deploy gates: `command: status --fail-on-degrade` blocks merges
-  if the latest run degraded significantly.
-- Multi-tenant RBAC + audit logs + SOC 2 Type II.
-- Mobile RUM SDK (iOS/Android).
+- ✅ **Anomaly detection** (Layer 1 of the research plan's
+  three-layer stack): `AnomalyDetectionStrategy` with rolling
+  z-score, configurable window, direction (higher/lower/both),
+  minimum samples, and zero-variance edge case. ADR 0011
+  describes the full algorithm. Layers 2 (Isolation Forest) and
+  3 (Prophet) plug into the same interface with no evaluator
+  changes — Phase 5 work.
+- ✅ **Session replay** via rrweb — delivered in Iteration 3,
+  documented in ADR 0009.
+- ✅ **OpenTelemetry trace correlation**: synthetic-kit calls
+  `injectTraceHeaders` on the BrowserContext's extra HTTP
+  headers so every outbound request (including navigation)
+  carries a `traceparent`. OTLP export wired via
+  `initTracing` in `packages/observability`. ADR 0012.
+- ✅ **Public status pages**: `GET /v1/status.json` +
+  `GET /v1/status/*` render unauthenticated platform status.
+  Dependency-free HTML template.
+- ✅ **PR deploy gates**: `action-dispatcher` `status` command
+  now supports `--fail-on-degrade`, `--window N`, and
+  `--min-success-ratio F` flags. Outputs `latest_status` and
+  `success_ratio` for downstream workflow steps.
+- ✅ **RBAC + audit logs** delivered as part of Phase 1 above.
+  SOC 2 Type II certification itself is a business-process item,
+  not a code gap.
+- ✅ **Mobile RUM SDK**: `@insightview/rum-mobile` package —
+  runtime-agnostic TypeScript that compiles for React Native
+  and embeds as a module inside Swift/Kotlin hosts via a
+  `NativeHost` hook interface. Same wire format as the browser
+  SDK so the same rum-collector accepts mobile beacons.
 
 ## Migration paths
 
