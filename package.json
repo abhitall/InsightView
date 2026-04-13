@@ -12,6 +12,8 @@
     "typecheck": "pnpm -r run typecheck",
     "lint": "pnpm -r run lint",
     "test": "pnpm -r run test",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
     "db:generate": "pnpm --filter @insightview/db run generate",
     "db:migrate": "pnpm --filter @insightview/db run migrate",
     "db:seed": "pnpm --filter @insightview/db run seed",
@@ -28,7 +30,8 @@
   "devDependencies": {
     "typescript": "^5.6.3",
     "@types/node": "^22.9.0",
-    "tsx": "^4.19.2"
+    "tsx": "^4.19.2",
+    "vitest": "^2.1.5"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

@@ -108,12 +108,23 @@ export interface MonitorSpec {
   preCookies?: Array<{ name: string; value: string; domain?: string; path?: string }>;
 }
 
+export interface CdnCacheInfo {
+  /** HIT | MISS | UNKNOWN derived from cf-cache-status, x-cache, etc. */
+  status: "HIT" | "MISS" | "UNKNOWN";
+  source?: string;
+  raw?: string;
+  age?: number;
+}
+
 export interface StepResult {
   name: string;
   url: string;
   durationMs: number;
   status: "passed" | "failed" | "error" | "partial";
   statusCode?: number;
+  cdnCache?: CdnCacheInfo;
+  flaky?: boolean;
+  attempts?: number;
   webVitals: WebVitals;
   navigationTiming: NavigationTiming;
   resourceStats: ResourceStats;

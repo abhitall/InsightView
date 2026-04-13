@@ -4,6 +4,7 @@ import { storageStateAuth } from "./storageState.js";
 import { formLoginAuth } from "./formLogin.js";
 import { totpAuth } from "./totp.js";
 import { oauthClientCredsAuth } from "./oauthClientCreds.js";
+import { vaultOidcAuth } from "./vaultOidc.js";
 
 /**
  * Auth strategy interface. Each strategy mutates a freshly created
@@ -43,3 +44,4 @@ registerAuthStrategy(storageStateAuth);
 registerAuthStrategy(formLoginAuth);
 registerAuthStrategy(totpAuth);
 registerAuthStrategy(oauthClientCredsAuth);
+registerAuthStrategy(vaultOidcAuth);

@@ -1,0 +1,74 @@
+{
+  "title": "InsightView — Real User Monitoring",
+  "uid": "insightview-rum",
+  "schemaVersion": 38,
+  "version": 1,
+  "timezone": "browser",
+  "time": { "from": "now-24h", "to": "now" },
+  "refresh": "1m",
+  "tags": ["insightview", "rum"],
+  "templating": {
+    "list": [
+      {
+        "name": "site",
+        "type": "query",
+        "datasource": "InsightViewApi",
+        "query": "sites",
+        "multi": false,
+        "includeAll": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Sessions (24h)",
+      "datasource": "InsightViewApi",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "targets": [{ "path": "/v1/rum/sessions", "params": { "siteId": "$site" } }]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "LCP — RUM p75",
+      "datasource": "InsightViewApi",
+      "gridPos": { "x": 6, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        { "path": "/v1/rum/events", "params": { "siteId": "$site", "type": "WEB_VITAL", "name": "LCP" } }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Synthetic vs RUM LCP overlay",
+      "datasource": "-- Mixed --",
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 10 },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "synthetic_monitoring_web_vitals{metric=\"LCP\",monitor=~\".*$site.*\"}",
+          "legendFormat": "synthetic {{monitor}}",
+          "refId": "A"
+        },
+        {
+          "datasource": "InsightViewApi",
+          "path": "/v1/rum/summary",
+          "params": { "siteId": "$site" },
+          "refId": "B"
+        }
+      ],
+      "description": "Directly compares the controlled synthetic baseline against the noisy real-world RUM distribution for the same site. A sudden gap between the two signals CDN issues, third-party regressions, or geographic performance shifts."
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Recent RUM errors",
+      "datasource": "InsightViewApi",
+      "gridPos": { "x": 0, "y": 18, "w": 24, "h": 10 },
+      "targets": [
+        { "path": "/v1/rum/events", "params": { "siteId": "$site", "type": "ERROR", "limit": 100 } }
+      ]
+    }
+  ]
+}

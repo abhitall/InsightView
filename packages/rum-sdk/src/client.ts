@@ -3,6 +3,7 @@ import { installWebVitals } from "./instruments/webVitals.js";
 import { installErrorHandlers } from "./instruments/errors.js";
 import { installNavigation } from "./instruments/navigation.js";
 import { installResources } from "./instruments/resources.js";
+import { installReplay, type ReplayHandle } from "./instruments/replay.js";
 import { Buffer } from "./buffer.js";
 import { sendBatch } from "./transport.js";
 
@@ -17,7 +18,13 @@ export interface InitOptions {
     errors?: boolean;
     resources?: boolean;
     navigation?: boolean;
+    replay?: boolean;
   };
+  /** Optional separate replay endpoint (defaults to endpoint + /replay). */
+  replayEndpoint?: string;
+  /** Sample rate for session replay specifically. Replay is 10-50x larger
+   *  than standard telemetry so this should be much smaller than sampleRate. */
+  replaySampleRate?: number;
   user?: { id?: string; traits?: Record<string, string> };
   beforeSend?: (ev: RumEventInput) => RumEventInput | null;
 }
@@ -96,6 +103,21 @@ export function init(opts: InitOptions): RumClient {
   if (auto.errors !== false) installErrorHandlers(push);
   if (auto.navigation !== false) installNavigation(push);
   if (auto.resources === true) installResources(push);
+  let replayHandle: ReplayHandle | undefined;
+  if (auto.replay === true) {
+    replayHandle = installReplay(
+      {
+        endpoint:
+          opts.replayEndpoint ??
+          opts.endpoint.replace(/\/v1\/events$/, "/v1/replay") ??
+          opts.endpoint,
+        siteId: opts.siteId,
+        sessionId,
+        sampleRate: opts.replaySampleRate ?? 0.05,
+      },
+      push,
+    );
+  }
 
   // Flush on visibility change and pagehide (critical for mobile).
   const flushNow = () => {
@@ -136,9 +158,12 @@ export function init(opts: InitOptions): RumClient {
     },
     async flush() {
       await doSend();
+      await replayHandle?.flush();
     },
     async shutdown() {
       await doSend();
+      await replayHandle?.flush();
+      replayHandle?.stop();
     },
   };
 }

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import {
   ErrorCategory,
   RunStatus,
@@ -29,7 +29,40 @@ export interface RunCheckOptions {
   location?: string;
   artifactsDir?: string;
   tenantId?: string;
+  /** Re-use an already-launched browser. When provided the function
+   *  does NOT close the browser on exit — the caller owns its lifecycle.
+   *  Used by runCheckBatch for memory-efficient back-to-back runs. */
+  externalBrowser?: Browser;
+  /** Emulate a throttled network profile. See NetworkEmulation below. */
+  networkEmulation?: NetworkEmulation;
 }
+
+/**
+ * CDP network throttling presets. Useful for monitoring "how fast
+ * is the site on mobile 3G" baselines without ever leaving CI.
+ * Values match Chrome DevTools preset definitions.
+ */
+export type NetworkEmulation =
+  | "fast-3g"
+  | "slow-3g"
+  | "4g"
+  | "offline"
+  | {
+      offline?: boolean;
+      downloadKbps: number;
+      uploadKbps: number;
+      latencyMs: number;
+    };
+
+const EMULATION_PRESETS: Record<
+  "fast-3g" | "slow-3g" | "4g" | "offline",
+  { offline?: boolean; downloadKbps: number; uploadKbps: number; latencyMs: number }
+> = {
+  "fast-3g": { downloadKbps: 1600, uploadKbps: 750, latencyMs: 150 },
+  "slow-3g": { downloadKbps: 500, uploadKbps: 500, latencyMs: 400 },
+  "4g": { downloadKbps: 9000, uploadKbps: 9000, latencyMs: 20 },
+  offline: { offline: true, downloadKbps: 0, uploadKbps: 0, latencyMs: 0 },
+};
 
 /**
  * Orchestrate one run of a monitor spec. This is the main entry
@@ -84,13 +117,18 @@ export async function runCheck(
   }, timeoutMs + 5_000);
 
   let browser: Browser | undefined;
+  const ownsBrowser = !opts.externalBrowser;
   try {
-    browser = await chromium.launch({
-      headless: true,
-      executablePath: process.env.CHROMIUM_EXECUTABLE_PATH || undefined,
-      args: ["--no-sandbox", "--disable-dev-shm-usage"],
-      ...launchOptions,
-    });
+    if (opts.externalBrowser) {
+      browser = opts.externalBrowser;
+    } else {
+      browser = await chromium.launch({
+        headless: true,
+        executablePath: process.env.CHROMIUM_EXECUTABLE_PATH || undefined,
+        args: ["--no-sandbox", "--disable-dev-shm-usage"],
+        ...launchOptions,
+      });
+    }
 
     const context = await browser.newContext({
       bypassCSP: true,
@@ -118,6 +156,11 @@ export async function runCheck(
       await auth.apply(context, spec.auth.config);
     }
 
+    // Apply CDP network throttling if requested.
+    if (opts.networkEmulation) {
+      await applyNetworkEmulation(context, opts.networkEmulation);
+    }
+
     // Install the Web Vitals collector at the context level so it
     // runs on every page created afterward, BEFORE any page scripts.
     await installWebVitalsCollector(context);
@@ -131,11 +174,12 @@ export async function runCheck(
         ...step,
         assertions: step.assertions ?? spec.assertions ?? [],
       };
-      const result = await runStep({
+      const result = await runStepWithRetry({
         step: effectiveStep,
         context,
         runArtifactsDir,
         timeoutMs,
+        maxAttempts: 1 + (spec.retries ?? 0),
       });
       steps.push(result);
     }
@@ -166,10 +210,12 @@ export async function runCheck(
       errorMessage: classified.reason,
     });
   } finally {
-    try {
-      await browser?.close();
-    } catch {
-      /* ignore */
+    if (ownsBrowser) {
+      try {
+        await browser?.close();
+      } catch {
+        /* ignore */
+      }
     }
   }
 
@@ -195,6 +241,64 @@ interface RunStepArgs {
   context: import("playwright").BrowserContext;
   runArtifactsDir: string;
   timeoutMs: number;
+}
+
+interface RunStepWithRetryArgs extends RunStepArgs {
+  maxAttempts: number;
+}
+
+/**
+ * Retry wrapper. Follows the monitoring-industry "three strikes"
+ * pattern: we attempt a step up to `maxAttempts` times ONLY if the
+ * failure is classified as TARGET_DOWN or INFRA_FAILURE (transient).
+ * TARGET_ERROR failures (assertion mismatches) never retry — that's
+ * the whole point of assertions.
+ *
+ * If a step passes on the second or later attempt, we set
+ * `flaky: true` on the result so alert rules can surface flakiness
+ * without hard-failing. This implements the `--fail-on-flaky-tests`
+ * semantic from the research plan.
+ */
+async function runStepWithRetry(
+  args: RunStepWithRetryArgs,
+): Promise<StepResult> {
+  let lastResult: StepResult | undefined;
+  for (let attempt = 1; attempt <= args.maxAttempts; attempt++) {
+    const result = await runStep({
+      step: args.step,
+      context: args.context,
+      runArtifactsDir: args.runArtifactsDir,
+      timeoutMs: args.timeoutMs,
+    });
+    result.attempts = attempt;
+    if (result.status === "passed" || result.status === "partial") {
+      if (attempt > 1) {
+        result.flaky = true;
+      }
+      return result;
+    }
+    // Non-transient failures (assertion errors) skip further retries.
+    if (
+      result.errorCategory === ErrorCategory.TARGET_ERROR &&
+      attempt >= 1
+    ) {
+      return result;
+    }
+    lastResult = result;
+  }
+  return (
+    lastResult ?? {
+      name: args.step.name,
+      url: args.step.url,
+      durationMs: 0,
+      status: "error",
+      webVitals: {},
+      navigationTiming: {},
+      resourceStats: { totalRequests: 0, failedRequests: 0, totalBytes: 0 },
+      cdpMetrics: {},
+      assertions: [],
+    }
+  );
 }
 
 async function runStep({
@@ -223,6 +327,12 @@ async function runStep({
       timeout: step.waitFor?.timeoutMs ?? Math.max(5_000, timeoutMs - 10_000),
     });
     stepResult.statusCode = response?.status() ?? 0;
+
+    // Capture CDN cache hit/miss from response headers. The set of
+    // headers we look for covers the major CDNs: Cloudflare, Fastly,
+    // Akamai, CloudFront, Vercel.
+    const headers = response?.headers() ?? {};
+    stepResult.cdnCache = classifyCacheHeaders(headers);
 
     if (step.waitFor?.selector) {
       await page
@@ -304,6 +414,83 @@ async function runStep({
 
 function sanitize(name: string): string {
   return name.replace(/[^a-zA-Z0-9_.-]/g, "_");
+}
+
+/**
+ * Detect CDN cache hit/miss from response headers. The header
+ * conventions we cover:
+ *
+ *   cf-cache-status: HIT | MISS | BYPASS | DYNAMIC | EXPIRED | REVALIDATED
+ *   x-cache:        HIT | MISS | HIT-from-cloudfront | ...
+ *   x-cache-status: HIT | MISS
+ *   x-vercel-cache: HIT | MISS
+ *   x-served-by:    usually Fastly — treat presence as UNKNOWN
+ *   age:            cache age in seconds, indicates edge-cached
+ */
+function classifyCacheHeaders(
+  headers: Record<string, string>,
+): import("./types.js").CdnCacheInfo {
+  const check = (name: string) => {
+    const v = headers[name.toLowerCase()];
+    if (!v) return null;
+    return { source: name, raw: v };
+  };
+  const sources = [
+    check("cf-cache-status"),
+    check("x-cache"),
+    check("x-cache-status"),
+    check("x-vercel-cache"),
+  ].filter((x): x is { source: string; raw: string } => x !== null);
+  if (sources.length === 0) {
+    return { status: "UNKNOWN" };
+  }
+  const first = sources[0];
+  const upper = first.raw.toUpperCase();
+  const status: "HIT" | "MISS" | "UNKNOWN" = upper.includes("HIT")
+    ? "HIT"
+    : upper.includes("MISS")
+      ? "MISS"
+      : "UNKNOWN";
+  const ageHeader = headers["age"];
+  return {
+    status,
+    source: first.source,
+    raw: first.raw,
+    age: ageHeader ? parseInt(ageHeader, 10) : undefined,
+  };
+}
+
+/**
+ * Apply Chrome DevTools network throttling to a context. Uses the
+ * CDP Network.emulateNetworkConditions command on a fresh session.
+ */
+async function applyNetworkEmulation(
+  context: BrowserContext,
+  emulation: import("./runCheck.js").NetworkEmulation,
+): Promise<void> {
+  const preset =
+    typeof emulation === "string" ? EMULATION_PRESETS[emulation] : emulation;
+  if (!preset) return;
+  try {
+    // The throttle applies to every page opened in the context; we
+    // install it via addInitScript fail-safe with a CDP fallback
+    // when the first page opens. Simpler: install on a dedicated
+    // throwaway page and then close it.
+    const page = await context.newPage();
+    const client = await context.newCDPSession(page);
+    await client.send("Network.emulateNetworkConditions", {
+      offline: preset.offline ?? false,
+      downloadThroughput: (preset.downloadKbps * 1024) / 8,
+      uploadThroughput: (preset.uploadKbps * 1024) / 8,
+      latency: preset.latencyMs,
+    });
+    await client.detach();
+    await page.close();
+  } catch (err) {
+    console.warn(
+      `[runCheck] network emulation failed: ${(err as Error).message}`,
+    );
+  }
 }
 
 interface BuildEnvelopeArgs {

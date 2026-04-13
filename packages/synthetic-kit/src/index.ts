@@ -1,6 +1,7 @@
 export * from "./types.js";
 export * from "./errors.js";
 export * from "./runCheck.js";
+export * from "./runCheckBatch.js";
 export * from "./spec/schema.js";
 export * from "./spec/parse.js";
 export {

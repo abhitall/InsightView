@@ -10,6 +10,8 @@ import { registerAlertRoutes } from "./routes/alerts.js";
 import { registerRumRoutes } from "./routes/rum.js";
 import { registerMonitorRoutes } from "./routes/monitors.js";
 import { registerMetricsRoute } from "./routes/metrics.js";
+import { registerIngestRoutes } from "./routes/ingest.js";
+import { registerSourceMapRoutes } from "./routes/sourceMaps.js";
 import { tenantPlugin } from "./plugins/tenant.js";
 import { createRegistry } from "@insightview/observability";
 
@@ -67,6 +69,8 @@ export async function buildServer(): Promise<FastifyInstance> {
   await registerAlertRoutes(app);
   await registerRumRoutes(app);
   await registerMonitorRoutes(app);
+  await registerIngestRoutes(app);
+  await registerSourceMapRoutes(app);
 
   return app;
 }

@@ -41,6 +41,13 @@ Both modes read the same `monitors/*.yaml` files and emit the same
 `ResultEnvelope` shape, so you can start in Actions-native mode and
 layer the platform on top later without rewriting anything.
 
+**Crucially, both modes are implemented by the same code**: the
+platform runner (`apps/runner`) is a thin wrapper around
+`@insightview/synthetic-kit` — the same library the Actions-native
+mode uses. See [ADR 0008](adr/0008-platform-runner-unification.md)
+for the rationale. One source of truth means one place to fix bugs
+and add features.
+
 ## High-level design (platform mode)
 
 ```
@@ -328,6 +335,16 @@ are all implemented in `packages/synthetic-kit`:
 | GitHub Actions cron is dropped silently | Triple-trigger (schedule + workflow_dispatch + repository_dispatch) + dead-man's-switch heartbeat |
 | Target down vs. our CI broken ambiguity | `classifyError` returns one of `TARGET_DOWN`, `TARGET_ERROR`, `INFRA_FAILURE`, `PARTIAL` |
 | Total collection failure loses all data | Always emit Navigation Timing fallback so TTFB/FCP/DNS/TLS/DCL/load survive even if web-vitals fails |
-| Auth requires credentials in code | Strategy pattern: `none`, `storage-state`, `form-login`, `totp`, `oauth-client-credentials` |
+| Auth requires credentials in code | Strategy pattern: `none`, `storage-state`, `form-login`, `totp`, `oauth-client-credentials`, `vault-oidc` (with dual-credential rotation) |
 | Private network access needs a VPN | `tailscale/github-action@v4` installs the tunnel at workflow level; synthetic-kit sees a normal route |
 | mTLS for client-certificate endpoints | `mtls` network profile loads cert+key from base64 env vars |
+| CDN cache hit/miss is hidden in origin TTFB | `classifyCacheHeaders` detects `cf-cache-status`/`x-cache`/`x-vercel-cache` and emits `cdnCache: {status, source, age}` per step |
+| Flaky transient failures page on-call | `retries` spec field triggers retry-with-flaky marker so dashboards surface flakiness without firing alerts |
+| Browser memory leaks on long runs | `runCheckBatch` recycles the browser every N runs (default 20) |
+| CI can't exercise slow-network behavior | `networkEmulation: "fast-3g"` / `"slow-3g"` / `"4g"` / `"offline"` applies Chrome DevTools throttling |
+| Single-region monitoring misses geography | `infra/k8s/actions-runner-controller/` manifests deploy self-hosted runners across multiple regions |
+| Real user LCP diverges from synthetic baseline | Shared metric schema in Grafana dashboards (`infra/grafana/dashboards/rum.json`) overlays synthetic + RUM p75 directly |
+| Minified RUM error stacks are unactionable | `POST /v1/source-maps` + `POST /v1/source-maps/resolve` deobfuscates via the `source-map` npm package |
+| Users abandon before error reproduces | rrweb-backed session replay opt-in at configurable sample rate, stored in `RumReplayChunk` |
+| High RUM traffic hits origin collector | Cloudflare Worker edge collector at `infra/cloudflare-worker/` proxies from 330+ PoPs |
+| Runner duplication between modes | Platform runner is now a thin wrapper around `@insightview/synthetic-kit` — ADR 0008 |

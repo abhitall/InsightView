@@ -32,6 +32,7 @@ const AuthSchema = z.object({
     "form-login",
     "totp",
     "oauth-client-credentials",
+    "vault-oidc",
   ]),
   config: z.record(z.unknown()).default({}),
 });

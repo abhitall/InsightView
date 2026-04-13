@@ -7,6 +7,8 @@ export * from "./repositories/rum.js";
 export * from "./repositories/watchdog.js";
 export * from "./repositories/channels.js";
 export * from "./repositories/deployments.js";
+export * from "./repositories/sourceMaps.js";
+export * from "./repositories/replay.js";
 export {
   Prisma,
   PrismaClient,
@@ -22,4 +24,6 @@ export type {
   RumEvent,
   WatchdogHeartbeat,
   MonitorDeployment,
+  SourceMap,
+  RumReplayChunk,
 } from "./generated/client/index.js";

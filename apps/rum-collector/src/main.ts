@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import { createLogger } from "@insightview/observability";
 import { registerEventRoutes } from "./routes/events.js";
+import { registerReplayRoutes } from "./routes/replay.js";
 
 const log = createLogger({ service: "rum-collector" });
 const port = Number(process.env.PORT ?? 4400);
@@ -29,6 +30,7 @@ async function main() {
   app.get("/healthz", async () => ({ ok: true, service: "rum-collector" }));
 
   await registerEventRoutes(app);
+  await registerReplayRoutes(app);
 
   try {
     await app.listen({ port, host });

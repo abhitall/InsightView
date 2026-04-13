@@ -1,0 +1,151 @@
+# Actions Runner Controller scale set. Deploys self-hosted GitHub
+# Actions runners as Kubernetes pods so InsightView can run
+# monitors from multiple regions without hitting the 20-job
+# concurrency limit of the GitHub-hosted runners.
+#
+# Prerequisites:
+#   1. Install ARC:
+#        helm repo add actions-runner-controller https://actions-runner-controller.github.io/actions-runner-controller
+#        helm install arc actions-runner-controller/gha-runner-scale-set-controller \
+#          --namespace arc-systems --create-namespace
+#   2. Create the GitHub App or PAT secret:
+#        kubectl create secret generic insightview-gh-token \
+#          --namespace insightview-arc \
+#          --from-literal=github_token=ghp_xxxxx
+#   3. Apply this manifest (one per region):
+#        kubectl apply -f runner-scale-set.yaml
+#
+# Reference each region from the workflow with `runs-on`:
+#   runs-on: [self-hosted, insightview, us-east]
+#   runs-on: [self-hosted, insightview, eu-west]
+
+apiVersion: actions.github.com/v1alpha1
+kind: AutoscalingRunnerSet
+metadata:
+  name: insightview-us-east
+  namespace: insightview-arc
+spec:
+  githubConfigUrl: https://github.com/abhitall/InsightView
+  githubConfigSecret: insightview-gh-token
+  minRunners: 1
+  maxRunners: 20
+  runnerGroup: insightview-us-east
+  template:
+    spec:
+      nodeSelector:
+        topology.kubernetes.io/region: us-east-1
+      containers:
+        - name: runner
+          image: ghcr.io/actions/actions-runner:latest
+          command: ["/home/runner/run.sh"]
+          env:
+            - name: RUNNER_LABELS
+              value: "self-hosted,insightview,us-east"
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+            limits:
+              cpu: "4"
+              memory: "7Gi"
+          # Mount a tmpfs for /tmp so screenshots and traces don't
+          # hit the host disk.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: home
+              mountPath: /home/runner/_work
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+        - name: home
+          emptyDir:
+            sizeLimit: 10Gi
+---
+apiVersion: actions.github.com/v1alpha1
+kind: AutoscalingRunnerSet
+metadata:
+  name: insightview-eu-west
+  namespace: insightview-arc
+spec:
+  githubConfigUrl: https://github.com/abhitall/InsightView
+  githubConfigSecret: insightview-gh-token
+  minRunners: 1
+  maxRunners: 20
+  runnerGroup: insightview-eu-west
+  template:
+    spec:
+      nodeSelector:
+        topology.kubernetes.io/region: eu-west-1
+      containers:
+        - name: runner
+          image: ghcr.io/actions/actions-runner:latest
+          command: ["/home/runner/run.sh"]
+          env:
+            - name: RUNNER_LABELS
+              value: "self-hosted,insightview,eu-west"
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+            limits:
+              cpu: "4"
+              memory: "7Gi"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: home
+              mountPath: /home/runner/_work
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+        - name: home
+          emptyDir:
+            sizeLimit: 10Gi
+---
+apiVersion: actions.github.com/v1alpha1
+kind: AutoscalingRunnerSet
+metadata:
+  name: insightview-ap-southeast
+  namespace: insightview-arc
+spec:
+  githubConfigUrl: https://github.com/abhitall/InsightView
+  githubConfigSecret: insightview-gh-token
+  minRunners: 1
+  maxRunners: 10
+  runnerGroup: insightview-ap-southeast
+  template:
+    spec:
+      nodeSelector:
+        topology.kubernetes.io/region: ap-southeast-1
+      containers:
+        - name: runner
+          image: ghcr.io/actions/actions-runner:latest
+          command: ["/home/runner/run.sh"]
+          env:
+            - name: RUNNER_LABELS
+              value: "self-hosted,insightview,ap-southeast"
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+            limits:
+              cpu: "4"
+              memory: "7Gi"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: home
+              mountPath: /home/runner/_work
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+        - name: home
+          emptyDir:
+            sizeLimit: 10Gi

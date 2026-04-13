@@ -320,40 +320,51 @@ packages/
   event-bus/       - EventBus interface + BullMQ impl
   observability/   - pino + prom-client helpers
   rum-sdk/         - browser RUM SDK (esbuild IIFE build)
+  rum-react/       - React hooks + provider for the RUM SDK
+  rum-vue/         - Vue 3 plugin for the RUM SDK
+  synthetic-kit/   - Playwright-based synthetic runner library
+                     (shared by platform runner AND native-run)
 
 apps/
   api/               - Fastify REST API + metrics + monitors-as-code
+                       + /v1/runs/ingest, /v1/source-maps, /v1/source-maps/resolve
   scheduler/         - Leader-elected cron reconciler + watchdog
-  runner/            - Playwright-based check executor
+  runner/            - Platform-mode runner (thin wrapper around synthetic-kit)
   runner/src/legacy/ - Preserved v1 Playwright fixture path
   alerting/          - Strategy evaluator + channel dispatcher
-  rum-collector/     - Fastify RUM intake + validation
+  rum-collector/     - Fastify RUM intake + replay chunks
   dashboard/         - Vite + React SPA
   action-dispatcher/ - CLI powering the composite GitHub Action
 
 infra/
-  docker-compose.yml        - Full stack
-  docker/                   - Service Dockerfiles
-  prometheus/prometheus.yml - Scrape config
-  test-site/                - nginx-served HTML + RUM SDK bundle
-  e2e/                      - End-to-end test harness
+  docker-compose.yml              - Full stack
+  docker/                         - Service Dockerfiles
+  prometheus/prometheus.yml       - Scrape config
+  test-site/                      - nginx-served HTML + RUM SDK bundle
+  e2e/                            - End-to-end test harness
+  grafana/dashboards/             - Grafana JSON dashboards (synthetic + RUM)
+  cloudflare-worker/              - Edge RUM collector (sub-ms cold start)
+  k8s/actions-runner-controller/  - ARC manifests for self-hosted runners
 
 monitors/
   *.yaml           - Monitors-as-code definitions
 
 .github/workflows/
-  run-check.yml                   - command: run
+  ci.yml                          - typecheck + unit tests on every push
+  native-synthetic.yml            - Actions-native monitoring (triple-triggered)
+  run-check.yml                   - command: run (platform mode)
   deploy-monitors.yml             - command: deploy
   validate-monitors.yml           - command: validate
-  e2e.yml                         - full stack end-to-end gate
+  e2e.yml                         - full stack end-to-end gate (label-gated)
   legacy-synthetic-monitoring.yml - v1 cron workflow (deprecated)
 
 docs/
-  ARCHITECTURE.md
-  ROADMAP.md
-  GAP_ANALYSIS.md
-  adr/0001..0006-*.md
-  SECRETS_CONFIGURATION.md
+  ARCHITECTURE.md          - HLD + LLD, sequence diagrams, seams
+  ROADMAP.md               - 18-month phased plan
+  GAP_ANALYSIS.md          - 12-item severity matrix
+  MONITORING_RECIPES.md    - SPA/SSR/static/CDN/API/authed recipes
+  adr/0001..0009-*.md      - Architectural decision records
+  SECRETS_CONFIGURATION.md - Legacy secrets guide
 ```
 
 ## Local development
@@ -361,10 +372,26 @@ docs/
 ```bash
 pnpm install
 pnpm typecheck           # typecheck all workspaces
+pnpm test:unit           # 33 unit tests across strategies/errors/parsers
 pnpm build               # compile all workspaces
-pnpm compose:up          # full-stack dev loop
+pnpm compose:up          # full-stack dev loop (platform mode)
 pnpm compose:logs        # tail all service logs
 pnpm compose:down        # stop and remove volumes
+```
+
+### Running native-run locally
+
+Even without the platform stack you can run Actions-native monitors:
+
+```bash
+# Run a single monitor file
+CHROMIUM_EXECUTABLE_PATH=$(pnpm --filter @insightview/runner exec playwright show-path chromium 2>/dev/null || echo "") \
+INSIGHTVIEW_MONITORS_PATH=monitors/example-com.yaml \
+pnpm --filter @insightview/action-dispatcher start native-run
+
+# Or run every YAML in a directory
+INSIGHTVIEW_MONITORS_PATH=monitors/ \
+pnpm --filter @insightview/action-dispatcher start native-run
 ```
 
 Individual services:

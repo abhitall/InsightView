@@ -18,6 +18,7 @@
     "@insightview/db": "workspace:*",
     "@insightview/event-bus": "workspace:*",
     "@insightview/observability": "workspace:*",
+    "@insightview/synthetic-kit": "workspace:*",
     "@aws-sdk/client-s3": "^3.758.0",
     "@smithy/node-http-handler": "^4.1.1",
     "archiver": "^7.0.1",

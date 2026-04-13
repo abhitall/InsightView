@@ -252,3 +252,37 @@ model MonitorDeployment {
 
   @@index([tenantId, createdAt])
 }
+
+// Uploaded source maps for RUM error deobfuscation. Clients POST
+// their source maps keyed by release + bundle URL; the error
+// enrichment pipeline looks them up by matching the frame's URL
+// against the stored key.
+model SourceMap {
+  id          String   @id @default(cuid())
+  tenantId    String   @default("default")
+  release     String
+  bundleUrl   String
+  content     String
+  contentHash String
+  createdAt   DateTime @default(now())
+
+  @@unique([tenantId, release, bundleUrl])
+  @@index([tenantId, release])
+}
+
+// Session replay chunks. Stored as serialized rrweb event
+// sequences so they can be replayed client-side. One row per
+// batch flushed by the SDK; the dashboard joins by sessionId +
+// sequence number to reconstruct the timeline.
+model RumReplayChunk {
+  id        String   @id @default(cuid())
+  tenantId  String   @default("default")
+  sessionId String
+  siteId    String
+  sequence  Int
+  payload   String
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, sessionId, sequence])
+  @@index([tenantId, siteId, createdAt])
+}

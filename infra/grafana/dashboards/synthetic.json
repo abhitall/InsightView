@@ -1,0 +1,121 @@
+{
+  "title": "InsightView — Synthetic Monitoring",
+  "uid": "insightview-synthetic",
+  "schemaVersion": 38,
+  "version": 1,
+  "timezone": "browser",
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "1m",
+  "tags": ["insightview", "synthetic"],
+  "templating": {
+    "list": [
+      {
+        "name": "monitor",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(synthetic_monitoring_status, monitor)",
+        "multi": true,
+        "includeAll": true
+      },
+      {
+        "name": "location",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(synthetic_monitoring_status, location)",
+        "multi": true,
+        "includeAll": true
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Uptime (24h)",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "avg_over_time(synthetic_monitoring_status{monitor=~\"$monitor\",location=~\"$location\"}[24h]) * 100",
+          "legendFormat": "{{monitor}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 99 },
+              { "color": "green", "value": 99.9 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Run duration (p95 by monitor)",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 6, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "synthetic_monitoring_duration_ms{monitor=~\"$monitor\",location=~\"$location\"}",
+          "legendFormat": "{{monitor}} ({{location}})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ms" }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "LCP — synthetic baseline",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "synthetic_monitoring_web_vitals{metric=\"LCP\",monitor=~\"$monitor\",location=~\"$location\"}",
+          "legendFormat": "{{monitor}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ms" }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "CLS",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "synthetic_monitoring_web_vitals{metric=\"CLS\",monitor=~\"$monitor\",location=~\"$location\"}",
+          "legendFormat": "{{monitor}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Failing assertions (last hour)",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (monitor, outcome) (increase(synthetic_monitoring_assertions{monitor=~\"$monitor\"}[1h]))",
+          "refId": "A",
+          "format": "table"
+        }
+      ]
+    }
+  ]
+}

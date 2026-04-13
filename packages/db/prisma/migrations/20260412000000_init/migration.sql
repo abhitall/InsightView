@@ -191,6 +191,32 @@ CREATE TABLE "MonitorDeployment" (
     CONSTRAINT "MonitorDeployment_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "SourceMap" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL DEFAULT 'default',
+    "release" TEXT NOT NULL,
+    "bundleUrl" TEXT NOT NULL,
+    "content" TEXT NOT NULL,
+    "contentHash" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "SourceMap_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "RumReplayChunk" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL DEFAULT 'default',
+    "sessionId" TEXT NOT NULL,
+    "siteId" TEXT NOT NULL,
+    "sequence" INTEGER NOT NULL,
+    "payload" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "RumReplayChunk_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE INDEX "Check_tenantId_enabled_idx" ON "Check"("tenantId", "enabled");
 
@@ -241,6 +267,18 @@ CREATE UNIQUE INDEX "WatchdogHeartbeat_scope_key" ON "WatchdogHeartbeat"("scope"
 
 -- CreateIndex
 CREATE INDEX "MonitorDeployment_tenantId_createdAt_idx" ON "MonitorDeployment"("tenantId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "SourceMap_tenantId_release_idx" ON "SourceMap"("tenantId", "release");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "SourceMap_tenantId_release_bundleUrl_key" ON "SourceMap"("tenantId", "release", "bundleUrl");
+
+-- CreateIndex
+CREATE INDEX "RumReplayChunk_tenantId_sessionId_sequence_idx" ON "RumReplayChunk"("tenantId", "sessionId", "sequence");
+
+-- CreateIndex
+CREATE INDEX "RumReplayChunk_tenantId_siteId_createdAt_idx" ON "RumReplayChunk"("tenantId", "siteId", "createdAt");
 
 -- AddForeignKey
 ALTER TABLE "CheckRun" ADD CONSTRAINT "CheckRun_checkId_fkey" FOREIGN KEY ("checkId") REFERENCES "Check"("id") ON DELETE CASCADE ON UPDATE CASCADE;
