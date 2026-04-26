@@ -1,21 +1,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "insightview.fullname" . }}-api
+  name: {{ include "insightview.fullname" . }}-dashboard
   labels:
     {{- include "insightview.labels" . | nindent 4 }}
-    app.kubernetes.io/component: api
+    app.kubernetes.io/component: dashboard
 spec:
-  replicas: {{ .Values.api.replicas }}
+  replicas: {{ .Values.dashboard.replicas }}
   selector:
     matchLabels:
       app.kubernetes.io/name: insightview
-      app.kubernetes.io/component: api
+      app.kubernetes.io/component: dashboard
   template:
     metadata:
       labels:
         {{- include "insightview.labels" . | nindent 8 }}
-        app.kubernetes.io/component: api
+        app.kubernetes.io/component: dashboard
     spec:
       serviceAccountName: {{ include "insightview.serviceAccountName" . }}
       {{- with .Values.image.pullSecrets }}
@@ -25,47 +25,38 @@ spec:
       securityContext:
         {{- include "insightview.podSecurityContext" . | nindent 8 }}
       containers:
-        - name: api
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+        - name: dashboard
+          image: "{{ .Values.image.repository }}-dashboard:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             {{- include "insightview.containerSecurityContext" . | nindent 12 }}
-          args: ["pnpm", "--filter", "@insightview/api", "run", "start"]
           ports:
             - name: http
-              containerPort: 4000
-          env:
-            {{- include "insightview.env" . | nindent 12 }}
-            - name: PORT
-              value: "4000"
+              containerPort: 5173
           readinessProbe:
-            httpGet:
-              path: /readyz
-              port: 4000
+            httpGet: { path: /, port: 5173 }
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 4000
-            initialDelaySeconds: 10
-            periodSeconds: 15
+            httpGet: { path: /, port: 5173 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
           resources:
-            {{- toYaml .Values.api.resources | nindent 12 }}
+            {{- toYaml .Values.dashboard.resources | nindent 12 }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "insightview.fullname" . }}-api
+  name: {{ include "insightview.fullname" . }}-dashboard
   labels:
     {{- include "insightview.labels" . | nindent 4 }}
-    app.kubernetes.io/component: api
+    app.kubernetes.io/component: dashboard
 spec:
-  type: {{ .Values.api.service.type }}
+  type: {{ .Values.dashboard.service.type }}
   ports:
     - name: http
-      port: {{ .Values.api.service.port }}
-      targetPort: 4000
+      port: {{ .Values.dashboard.service.port }}
+      targetPort: 5173
   selector:
     app.kubernetes.io/name: insightview
-    app.kubernetes.io/component: api
+    app.kubernetes.io/component: dashboard

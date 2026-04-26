@@ -8,13 +8,19 @@ import {
   listEnabledRulesForCheck,
   listRunsByCheck,
   listResultsByRun,
-  rumWebVitalSummary,
+  rumWebVitalPercentiles,
   createIncident,
   findFiringIncident,
   resolveIncidentsForRule,
   type AlertIncident,
+  type AlertRule,
 } from "@insightview/db";
 import { strategyFor } from "./strategies/index.js";
+
+export interface FiredIncident {
+  incident: AlertIncident;
+  rule: AlertRule;
+}
 
 /**
  * Evaluator orchestration. Loads the enabled rules for a check,
@@ -32,12 +38,12 @@ export async function evaluateCompletion(
   ctx: TenantContext,
   payload: CheckCompletedPayload,
   log: Logger,
-): Promise<AlertIncident[]> {
+): Promise<FiredIncident[]> {
   const rules = await listEnabledRulesForCheck(ctx, payload.checkId);
   if (rules.length === 0) return [];
 
   const recentRuns = await listRunsByCheck(ctx, payload.checkId, 20);
-  const createdIncidents: AlertIncident[] = [];
+  const createdIncidents: FiredIncident[] = [];
 
   // Pre-compute historical metric samples for anomaly detection.
   // We only do this work if at least one rule actually needs it.
@@ -71,30 +77,32 @@ export async function evaluateCompletion(
     }
   }
 
-  // Pre-compute RUM aggregates for RUM_METRIC rules.
+  // Pre-compute RUM aggregates for RUM_METRIC rules. Real percentiles
+  // are computed via Postgres `percentile_cont`; the previous
+  // `avg * 1.2` / `avg * 1.5` placeholders are gone.
   const needsRum = rules.some((r) => r.strategy === "RUM_METRIC");
   const rumAggregates: Record<
     string,
     { p50: number; p75: number; p95: number; count: number; mean: number }
   > = {};
   if (needsRum) {
-    // For MVP we treat the check's tag list as the RUM site-id
-    // hint. In a production deployment the rule would carry its
-    // own siteId; this keeps the wiring simple.
+    // For MVP we treat the configured site-id env as the lookup key.
+    // In a production deployment the rule would carry its own siteId
+    // in `expression.siteId`; this keeps the wiring simple.
     const siteId = process.env.RUM_SITE_ID ?? "default";
     try {
-      const summary = await rumWebVitalSummary(
+      const distributions = await rumWebVitalPercentiles(
         ctx,
         siteId,
         15 * 60 * 1000, // 15-minute window
       );
-      for (const row of summary) {
+      for (const row of distributions) {
         rumAggregates[row.metric] = {
-          p50: row.avg,
-          p75: row.avg * 1.2, // crude estimate until we store distributions
-          p95: row.avg * 1.5,
+          p50: row.p50,
+          p75: row.p75,
+          p95: row.p95,
           count: row.count,
-          mean: row.avg,
+          mean: row.mean,
         };
       }
     } catch (err) {
@@ -147,7 +155,7 @@ export async function evaluateCompletion(
         { incidentId: incident.id, rule: rule.name, severity: rule.severity },
         "incident fired",
       );
-      createdIncidents.push(incident);
+      createdIncidents.push({ incident, rule });
     } else if (decision.shouldResolve) {
       const count = await resolveIncidentsForRule(ctx, rule.id);
       if (count > 0) {

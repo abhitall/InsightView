@@ -16,7 +16,7 @@
     "test": "echo 'no tests'"
   },
   "dependencies": {
-    "rrweb": "^2.0.0-alpha.4",
+    "rrweb": "2.0.0-alpha.4",
     "web-vitals": "^4.2.4",
     "zod": "^3.23.8"
   },

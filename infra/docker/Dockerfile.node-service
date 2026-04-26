@@ -19,6 +19,10 @@ COPY packages/db/package.json packages/db/
 COPY packages/event-bus/package.json packages/event-bus/
 COPY packages/observability/package.json packages/observability/
 COPY packages/rum-sdk/package.json packages/rum-sdk/
+COPY packages/rum-react/package.json packages/rum-react/
+COPY packages/rum-vue/package.json packages/rum-vue/
+COPY packages/rum-mobile/package.json packages/rum-mobile/
+COPY packages/synthetic-kit/package.json packages/synthetic-kit/
 COPY apps/api/package.json apps/api/
 COPY apps/scheduler/package.json apps/scheduler/
 COPY apps/alerting/package.json apps/alerting/
@@ -27,7 +31,7 @@ COPY apps/runner/package.json apps/runner/
 COPY apps/dashboard/package.json apps/dashboard/
 COPY apps/action-dispatcher/package.json apps/action-dispatcher/
 
-RUN pnpm install --frozen-lockfile=false
+RUN pnpm install --frozen-lockfile
 
 # Copy sources
 COPY packages packages

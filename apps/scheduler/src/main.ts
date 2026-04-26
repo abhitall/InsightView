@@ -1,6 +1,6 @@
 import Fastify from "fastify";
 import IORedis from "ioredis";
-import { createLogger } from "@insightview/observability";
+import { createLogger, createRegistry } from "@insightview/observability";
 import { createEventBus, createScheduler } from "@insightview/event-bus";
 import { startLeaderLoop } from "./leaderElection.js";
 import { startScheduleLoop } from "./scheduleLoop.js";
@@ -17,6 +17,11 @@ const redisUrl = process.env.REDIS_URL ?? "redis://redis:6379";
 async function main() {
   const app = Fastify({ logger: false });
   app.get("/healthz", async () => ({ ok: true, service: "scheduler" }));
+  const registry = createRegistry("scheduler");
+  app.get("/metrics", async (_req, reply) => {
+    reply.header("Content-Type", registry.contentType);
+    return registry.metrics();
+  });
   await app.listen({ port, host });
   log.info({ port }, "scheduler health endpoint up");
 

@@ -1,5 +1,5 @@
 import Fastify from "fastify";
-import { createLogger } from "@insightview/observability";
+import { createLogger, createRegistry } from "@insightview/observability";
 import { createEventBus } from "@insightview/event-bus";
 import {
   Topics,
@@ -22,6 +22,11 @@ async function main() {
   const app = Fastify({ logger: false });
   let healthy = true;
   app.get("/healthz", async () => ({ ok: healthy, runner: runnerId }));
+  const registry = createRegistry("runner");
+  app.get("/metrics", async (_req, reply) => {
+    reply.header("Content-Type", registry.contentType);
+    return registry.metrics();
+  });
   await app.listen({ port, host });
   log.info({ port, runnerId }, "runner health endpoint up");
 

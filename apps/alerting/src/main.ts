@@ -1,5 +1,5 @@
 import Fastify from "fastify";
-import { createLogger } from "@insightview/observability";
+import { createLogger, createRegistry } from "@insightview/observability";
 import { createEventBus } from "@insightview/event-bus";
 import {
   Topics,
@@ -16,6 +16,11 @@ const host = process.env.HOST ?? "0.0.0.0";
 async function main() {
   const app = Fastify({ logger: false });
   app.get("/healthz", async () => ({ ok: true, service: "alerting" }));
+  const registry = createRegistry("alerting");
+  app.get("/metrics", async (_req, reply) => {
+    reply.header("Content-Type", registry.contentType);
+    return registry.metrics();
+  });
   await app.listen({ port, host });
   log.info({ port }, "alerting health endpoint up");
 
@@ -25,9 +30,9 @@ async function main() {
     async (env) => {
       const ctx = defaultTenant("alerting");
       try {
-        const incidents = await evaluateCompletion(ctx, env.payload, log);
-        for (const incident of incidents) {
-          await dispatchNotifications(ctx, incident, log);
+        const fired = await evaluateCompletion(ctx, env.payload, log);
+        for (const { incident, rule } of fired) {
+          await dispatchNotifications(ctx, incident, rule, log);
         }
       } catch (err) {
         log.error({ err, runId: env.payload.runId }, "evaluation failed");

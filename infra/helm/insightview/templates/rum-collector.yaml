@@ -17,10 +17,19 @@ spec:
         {{- include "insightview.labels" . | nindent 8 }}
         app.kubernetes.io/component: rum-collector
     spec:
+      serviceAccountName: {{ include "insightview.serviceAccountName" . }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- include "insightview.podSecurityContext" . | nindent 8 }}
       containers:
         - name: rum-collector
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "insightview.containerSecurityContext" . | nindent 12 }}
           args: ["pnpm", "--filter", "@insightview/rum-collector", "run", "start"]
           env:
             {{- include "insightview.env" . | nindent 12 }}
@@ -29,9 +38,14 @@ spec:
           ports:
             - name: http
               containerPort: 4400
+          readinessProbe:
+            httpGet: { path: /healthz, port: 4400 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
           livenessProbe:
             httpGet: { path: /healthz, port: 4400 }
-            initialDelaySeconds: 10
+            initialDelaySeconds: 15
+            periodSeconds: 15
           resources:
             {{- toYaml .Values.rumCollector.resources | nindent 12 }}
 ---

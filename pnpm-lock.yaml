@@ -215,7 +215,7 @@ importers:
         specifier: ^4.28.1
         version: 4.29.1
       playwright:
-        specifier: ^1.51.0
+        specifier: 1.59.1
         version: 1.59.1
       prom-client:
         specifier: ^15.1.0
@@ -225,7 +225,7 @@ importers:
         version: 4.2.4
     devDependencies:
       '@playwright/test':
-        specifier: ^1.51.0
+        specifier: 1.59.1
         version: 1.59.1
       '@types/archiver':
         specifier: ^6.0.2
@@ -277,7 +277,7 @@ importers:
         specifier: ^3.758.0
         version: 3.1029.0
       playwright:
-        specifier: ^1.51.0
+        specifier: 1.59.1
         version: 1.59.1
     devDependencies:
       '@types/node':
@@ -402,7 +402,7 @@ importers:
   packages/rum-sdk:
     dependencies:
       rrweb:
-        specifier: ^2.0.0-alpha.4
+        specifier: 2.0.0-alpha.4
         version: 2.0.0-alpha.4
       web-vitals:
         specifier: ^4.2.4
@@ -449,7 +449,7 @@ importers:
         specifier: ^9.3.4
         version: 9.5.0
       playwright:
-        specifier: ^1.51.0
+        specifier: 1.59.1
         version: 1.59.1
       prom-client:
         specifier: ^15.1.0

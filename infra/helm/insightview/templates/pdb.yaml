@@ -1,0 +1,21 @@
+{{- range $svc := list "api" "scheduler" "runner" "rumCollector" }}
+{{- $cfg := index $.Values $svc }}
+{{- if and $cfg $cfg.pdb $cfg.pdb.enabled }}
+{{- $name := $svc }}
+{{- if eq $svc "rumCollector" }}{{- $name = "rum-collector" }}{{- end }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "insightview.fullname" $ }}-{{ $name }}
+  labels:
+    {{- include "insightview.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  minAvailable: {{ $cfg.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: insightview
+      app.kubernetes.io/component: {{ $name }}
+{{- end }}
+{{- end }}
