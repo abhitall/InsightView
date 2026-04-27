@@ -5,6 +5,7 @@ import {
   rumWebVitalSummary,
 } from "@insightview/db";
 import { RumEventType } from "@insightview/core";
+import { parseLimit } from "../util/query.js";
 
 export async function registerRumRoutes(app: FastifyInstance): Promise<void> {
   app.get<{
@@ -22,7 +23,7 @@ export async function registerRumRoutes(app: FastifyInstance): Promise<void> {
       type: type ? RumEventType[type] : undefined,
       sessionId: req.query.sessionId,
       since: req.query.since ? new Date(req.query.since) : undefined,
-      limit: req.query.limit ? parseInt(req.query.limit, 10) : 100,
+      limit: parseLimit(req.query.limit),
     });
     return { items };
   });

@@ -44,7 +44,7 @@ jobs:
           corepack prepare pnpm@10.0.0 --activate
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile=false
+        run: pnpm install --frozen-lockfile
 
       - name: Generate Prisma client
         run: pnpm --filter @insightview/db run generate

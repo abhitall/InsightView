@@ -29,9 +29,34 @@ export const compositeStrategy: Strategy = {
       all?: SubRule[];
       any?: SubRule[];
     };
+    const hasAll =
+      Array.isArray(expr.all) && expr.all.length > 0;
+    const hasAny =
+      Array.isArray(expr.any) && expr.any.length > 0;
 
-    if (expr.all && Array.isArray(expr.all) && expr.all.length > 0) {
-      const results = expr.all.map((sub) => evalSub(ctx, sub));
+    // Enforce the contract documented above: exactly one of `all` or
+    // `any` must be present. Silently picking one when both are set
+    // would produce surprising alert behavior; rejecting both-empty
+    // prevents a misconfigured rule from firing forever.
+    if (hasAll && hasAny) {
+      return {
+        shouldFire: false,
+        shouldResolve: false,
+        reason:
+          "composite expression has both `all` and `any`; exactly one must be present",
+      };
+    }
+    if (!hasAll && !hasAny) {
+      return {
+        shouldFire: false,
+        shouldResolve: false,
+        reason:
+          "composite expression has neither `all` nor `any`; exactly one must be present",
+      };
+    }
+
+    if (hasAll) {
+      const results = expr.all!.map((sub) => evalSub(ctx, sub));
       const allFire = results.every((r) => r.shouldFire);
       return {
         shouldFire: allFire,
@@ -39,19 +64,12 @@ export const compositeStrategy: Strategy = {
         reason: `composite all: ${results.map((r) => r.reason).join("; ")}`,
       };
     }
-    if (expr.any && Array.isArray(expr.any) && expr.any.length > 0) {
-      const results = expr.any.map((sub) => evalSub(ctx, sub));
-      const anyFire = results.some((r) => r.shouldFire);
-      return {
-        shouldFire: anyFire,
-        shouldResolve: !anyFire,
-        reason: `composite any: ${results.map((r) => r.reason).join("; ")}`,
-      };
-    }
+    const results = expr.any!.map((sub) => evalSub(ctx, sub));
+    const anyFire = results.some((r) => r.shouldFire);
     return {
-      shouldFire: false,
-      shouldResolve: false,
-      reason: "composite has neither all nor any",
+      shouldFire: anyFire,
+      shouldResolve: !anyFire,
+      reason: `composite any: ${results.map((r) => r.reason).join("; ")}`,
     };
   },
 };
