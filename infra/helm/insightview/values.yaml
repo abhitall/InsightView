@@ -1,0 +1,142 @@
+# Default values for the InsightView chart. Override in
+# `values.production.yaml` or via `helm upgrade --set ...`.
+
+image:
+  repository: ghcr.io/abhitall/insightview
+  tag: ""              # defaults to .Chart.AppVersion when empty
+  pullPolicy: IfNotPresent
+  pullSecrets: []      # e.g. [{ name: regcred }]
+
+# Event bus backend. `kafka` requires a Kafka broker; `bullmq`
+# uses the bundled Redis.
+eventBus:
+  backend: bullmq # bullmq | kafka
+  redisUrl: redis://redis:6379
+  kafkaBrokers: kafka:9092
+
+# Database connection. By default the chart does NOT deploy
+# Postgres — point at an existing managed instance (RDS, Cloud
+# SQL, etc.) via databaseUrl. The value is stored in a K8s Secret.
+database:
+  url: postgres://insightview:insightview@postgres:5432/insightview
+
+# Observability
+otel:
+  enabled: false
+  exporterEndpoint: http://otel-collector:4318/v1/traces
+
+# Auth — when set, all non-health routes require Bearer auth. The
+# token is stored in a K8s Secret and projected into the pods via
+# secretKeyRef.
+apiToken: ""
+
+# Service account
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# Pod-level security defaults. Apply to every Deployment in the chart.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container-level security defaults. Apply to every container in
+# the chart. The runner currently mounts an emptyDir for browser
+# tmpfs, so readOnlyRootFilesystem is set per-service rather than
+# in this default.
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+  readOnlyRootFilesystem: false   # Override true on services that don't write to /tmp at runtime
+
+# Replica counts — default minimal, scale based on traffic.
+api:
+  replicas: 2
+  service:
+    type: ClusterIP
+    port: 4000
+  resources:
+    requests: { cpu: "200m", memory: "256Mi" }
+    limits: { cpu: "1000m", memory: "512Mi" }
+  hpa:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  pdb:
+    enabled: true
+    minAvailable: 1
+
+scheduler:
+  replicas: 2 # both replicas run but only the leader schedules
+  resources:
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits: { cpu: "500m", memory: "256Mi" }
+  pdb:
+    enabled: true
+    minAvailable: 1
+
+runner:
+  replicas: 3 # horizontal for throughput
+  resources:
+    requests: { cpu: "1000m", memory: "2Gi" }
+    limits: { cpu: "2000m", memory: "4Gi" }
+  hpa:
+    enabled: false
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 80
+  pdb:
+    enabled: true
+    minAvailable: 1
+
+alerting:
+  replicas: 2
+  resources:
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits: { cpu: "500m", memory: "256Mi" }
+
+rumCollector:
+  replicas: 3
+  service:
+    type: ClusterIP
+    port: 4400
+  resources:
+    requests: { cpu: "200m", memory: "256Mi" }
+    limits: { cpu: "1000m", memory: "512Mi" }
+  hpa:
+    enabled: false
+    minReplicas: 3
+    maxReplicas: 30
+    targetCPUUtilizationPercentage: 70
+  pdb:
+    enabled: true
+    minAvailable: 1
+
+dashboard:
+  replicas: 2
+  service:
+    type: ClusterIP
+    port: 5173
+  resources:
+    requests: { cpu: "50m", memory: "64Mi" }
+    limits: { cpu: "200m", memory: "128Mi" }
+
+# Optional ingress — enable to expose api / rum / dashboard via the
+# named hosts. Defaults assume nginx-ingress.
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  tls: []
+  hosts:
+    api: api.insightview.example.com
+    rum: rum.insightview.example.com
+    dashboard: dashboard.insightview.example.com
+    status: status.insightview.example.com

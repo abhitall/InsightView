@@ -1,0 +1,24 @@
+name: Validate Monitors
+
+# PR gate for monitors-as-code changes. Runs the validate command
+# which parses and schema-checks every YAML without calling the API.
+# Errors surface as GitHub Action annotations on the PR diff.
+
+on:
+  pull_request:
+    paths:
+      - "monitors/**"
+      - "action.yml"
+      - "apps/action-dispatcher/**"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate monitors YAML
+        uses: ./
+        with:
+          command: validate
+          monitors_path: monitors

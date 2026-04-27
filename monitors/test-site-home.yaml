@@ -1,0 +1,33 @@
+apiVersion: insightview.io/v1
+kind: Check
+metadata:
+  name: test-site-home
+  description: "Synthetic check against the docker-compose test-site home page"
+  tags: ["e2e", "seed"]
+spec:
+  type: browser
+  enabled: true
+  schedule: "*/5 * * * *"
+  targetUrl: "http://test-site:80"
+  timeoutMs: 45000
+  scriptRef: basic-homepage
+  assertions:
+    - type: status
+      value: passed
+    - type: body-contains
+      value: "InsightView"
+
+---
+apiVersion: insightview.io/v1
+kind: AlertRule
+metadata:
+  name: test-site-home-fail
+spec:
+  checkName: test-site-home
+  enabled: true
+  strategy: CONSECUTIVE_FAILURES
+  expression:
+    threshold: 1
+  severity: CRITICAL
+  channels:
+    - stdout

@@ -1,0 +1,16 @@
+name = "insightview-rum-edge"
+main = "src/worker.ts"
+compatibility_date = "2024-09-01"
+workers_dev = true
+
+# Bind the upstream InsightView RUM collector URL at deploy time.
+# Override per environment with `wrangler secret put UPSTREAM_URL`.
+[vars]
+UPSTREAM_URL = "https://rum.example.com/v1/events"
+UPSTREAM_REPLAY_URL = "https://rum.example.com/v1/replay"
+RATE_LIMIT_PER_MINUTE = "1000"
+
+# Optional KV namespace for rate limiting.
+# [[kv_namespaces]]
+# binding = "RATE"
+# id = "your-kv-namespace-id"

@@ -1,25 +1,41 @@
 name: Test Action
 
+# Validates the composite action.yml against the legacy Playwright path.
+# Uses the official Playwright container so browsers are pre-installed
+# and command: legacy-run works immediately.
+
 on:
   pull_request:
     paths:
-      - 'action.yml'
-      - 'src/**'
-      - 'tests/**'
-      - 'package.json'
-      - 'playwright.config.ts'
+      - "action.yml"
+      - "apps/runner/**"
+      - "apps/action-dispatcher/**"
+      - "package.json"
+      - "pnpm-workspace.yaml"
   workflow_dispatch:
 
 jobs:
-  test:
+  test-legacy-run:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: mcr.microsoft.com/playwright:v1.59.1-noble
+      options: --user 1001 --ipc=host
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run Synthetic Monitoring
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.0.0 --activate
+
+      - name: Run legacy synthetic path via composite action
         uses: ./
         with:
-          test_url: 'http://example.com'
-          prometheus_pushgateway: 'http://localhost:9091'
-          browser: 'chromium'
-          test_dir: './tests'
+          command: legacy-run
+          test_url: "https://example.com"
+          browser: "chromium"

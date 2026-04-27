@@ -1,0 +1,48 @@
+# Runner image is based on Playwright's official container so browsers
+# and system deps are preinstalled. The base image MUST match the
+# Playwright version pinned in apps/runner/package.json,
+# packages/synthetic-kit/package.json, and infra/e2e/package.json,
+# otherwise the pre-bundled browser binaries don't match what the
+# library expects and `chromium.launch()` fails with "Executable
+# doesn't exist at /ms-playwright/...".
+FROM mcr.microsoft.com/playwright:v1.59.1-noble
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN corepack enable && corepack prepare pnpm@10.0.0 --activate
+
+WORKDIR /app
+
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* tsconfig.base.json tsconfig.json ./
+COPY packages/core/package.json packages/core/
+COPY packages/db/package.json packages/db/
+COPY packages/event-bus/package.json packages/event-bus/
+COPY packages/observability/package.json packages/observability/
+COPY packages/rum-sdk/package.json packages/rum-sdk/
+COPY packages/rum-react/package.json packages/rum-react/
+COPY packages/rum-vue/package.json packages/rum-vue/
+COPY packages/rum-mobile/package.json packages/rum-mobile/
+COPY packages/synthetic-kit/package.json packages/synthetic-kit/
+COPY apps/api/package.json apps/api/
+COPY apps/scheduler/package.json apps/scheduler/
+COPY apps/alerting/package.json apps/alerting/
+COPY apps/rum-collector/package.json apps/rum-collector/
+COPY apps/runner/package.json apps/runner/
+COPY apps/dashboard/package.json apps/dashboard/
+COPY apps/action-dispatcher/package.json apps/action-dispatcher/
+
+RUN pnpm install --frozen-lockfile
+
+COPY packages packages
+COPY apps apps
+COPY tsconfig.base.json ./
+
+WORKDIR /app/packages/db
+RUN pnpm prisma generate
+
+WORKDIR /app
+
+EXPOSE 4200
+CMD ["pnpm", "--filter", "@insightview/runner", "run", "start"]

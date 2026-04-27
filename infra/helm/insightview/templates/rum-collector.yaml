@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "insightview.fullname" . }}-rum-collector
+  labels:
+    {{- include "insightview.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rum-collector
+spec:
+  replicas: {{ .Values.rumCollector.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: insightview
+      app.kubernetes.io/component: rum-collector
+  template:
+    metadata:
+      labels:
+        {{- include "insightview.labels" . | nindent 8 }}
+        app.kubernetes.io/component: rum-collector
+    spec:
+      serviceAccountName: {{ include "insightview.serviceAccountName" . }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- include "insightview.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: rum-collector
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "insightview.containerSecurityContext" . | nindent 12 }}
+          args: ["pnpm", "--filter", "@insightview/rum-collector", "run", "start"]
+          env:
+            {{- include "insightview.env" . | nindent 12 }}
+            - name: PORT
+              value: "4400"
+          ports:
+            - name: http
+              containerPort: 4400
+          readinessProbe:
+            httpGet: { path: /healthz, port: 4400 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 4400 }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.rumCollector.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "insightview.fullname" . }}-rum-collector
+  labels:
+    {{- include "insightview.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rum-collector
+spec:
+  type: {{ .Values.rumCollector.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.rumCollector.service.port }}
+      targetPort: 4400
+  selector:
+    app.kubernetes.io/name: insightview
+    app.kubernetes.io/component: rum-collector

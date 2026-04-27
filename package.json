@@ -1,25 +1,45 @@
 {
-  "name": "synthetic-monitoring-action",
-  "version": "1.0.0",
+  "name": "insightview",
+  "version": "2.0.0-alpha.1",
   "private": true,
-  "type": "module",
-  "scripts": {
-    "test:synthetic": "playwright test",
-    "test:action": "chmod +x ./scripts/test-action.sh && ./scripts/test-action.sh",
-    "docker:test:up": "docker-compose -f docker-compose.test.yml up -d",
-    "docker:test:down": "docker-compose -f docker-compose.test.yml down -v"
+  "description": "InsightView monitoring platform - synthetic + RUM, accessible via GitHub Actions",
+  "packageManager": "pnpm@10.0.0",
+  "engines": {
+    "node": ">=20"
   },
-  "dependencies": {
-    "@aws-sdk/client-s3": "^3.758.0",
-    "@smithy/node-http-handler": "^4.1.1",
-    "archiver": "^7.0.1",
-    "prom-client": "^15.1.0",
-    "web-vitals": "^4.2.4"
+  "scripts": {
+    "build": "pnpm -r --filter=./packages/* --filter=./apps/* run build",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "pnpm -r run lint",
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
+    "db:generate": "pnpm --filter @insightview/db run generate",
+    "db:migrate": "pnpm --filter @insightview/db run migrate",
+    "db:seed": "pnpm --filter @insightview/db run seed",
+    "compose:up": "docker compose -f infra/docker-compose.yml up -d --wait",
+    "compose:down": "docker compose -f infra/docker-compose.yml down -v",
+    "compose:logs": "docker compose -f infra/docker-compose.yml logs --tail=200",
+    "compose:build": "docker compose -f infra/docker-compose.yml build",
+    "e2e:up": "pnpm compose:up",
+    "e2e:test": "pnpm --filter @insightview/e2e run test",
+    "e2e:down": "pnpm compose:down",
+    "e2e": "pnpm e2e:up && pnpm e2e:test ; rc=$? ; pnpm e2e:down ; exit $rc",
+    "legacy:test": "pnpm --filter @insightview/runner run legacy:test"
   },
   "devDependencies": {
-    "@playwright/test": "^1.51.0",
-    "@types/archiver": "^6.0.2",
-    "@types/node": "^22.13.10",
-    "typescript": "^5.8.2"
+    "typescript": "^5.6.3",
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.2",
+    "vitest": "^2.1.5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "esbuild",
+      "msgpackr-extract",
+      "prisma"
+    ]
   }
 }

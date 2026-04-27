@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>About — InsightView Test Site</title>
+    <style>
+      body { font-family: -apple-system, sans-serif; background: #f5f7fb; color: #1b2432; margin: 0; }
+      header { background: #0f1419; color: white; padding: 32px; text-align: center; }
+      main { max-width: 760px; margin: 32px auto; padding: 0 20px; }
+      .card { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 4px 14px rgba(0,0,0,.05); }
+      nav a { color: #6366f1; margin-right: 16px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>InsightView Test Site — About</h1>
+    </header>
+    <main>
+      <nav><a href="/">Home</a><a href="/about.html">About</a></nav>
+      <section class="card">
+        <h2>About this site</h2>
+        <p>
+          This page exists primarily so the synthetic runner and the
+          RUM SDK can exercise a multi-page navigation path during the
+          end-to-end test.
+        </p>
+      </section>
+    </main>
+    <script src="/sdk/insightview-rum.iife.js"></script>
+    <script>
+      if (window.InsightViewRUM && InsightViewRUM.init) {
+        InsightViewRUM.init({
+          endpoint: "http://localhost:4400/v1/events",
+          siteId: "test-site-home",
+          sampleRate: 1,
+          environment: "dev",
+          release: "test-site@0.1.0",
+        });
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,306 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: insightview
+      POSTGRES_PASSWORD: insightview
+      POSTGRES_DB: insightview
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U insightview"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - redis_data:/data
+
+  # Kafka (KRaft mode — no ZooKeeper). Enabled only when
+  # BUS_BACKEND=kafka is set in the service env so the default
+  # docker-compose up keeps booting fast. Bitnami's image is the
+  # canonical KRaft-first distribution.
+  kafka:
+    image: bitnami/kafka:3.7
+    profiles: ["kafka"]
+    environment:
+      KAFKA_CFG_NODE_ID: "0"
+      KAFKA_CFG_PROCESS_ROLES: "controller,broker"
+      KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "0@kafka:9093"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_CFG_NUM_PARTITIONS: "12"
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1 || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - kafka_data:/bitnami/kafka
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/insightview-artifacts &&
+      mc anonymous set download local/insightview-artifacts &&
+      echo 'MinIO bucket ready'
+      "
+
+  pushgateway:
+    image: prom/pushgateway:latest
+    ports:
+      - "9091:9091"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9091/-/healthy"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+    depends_on:
+      pushgateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.node-service
+      args:
+        SERVICE: db
+    command: >
+      sh -c "cd packages/db &&
+      pnpm prisma migrate deploy &&
+      pnpm prisma db seed"
+    environment:
+      DATABASE_URL: postgres://insightview:insightview@postgres:5432/insightview
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.node-service
+      args:
+        SERVICE: api
+    environment:
+      PORT: "4000"
+      DATABASE_URL: postgres://insightview:insightview@postgres:5432/insightview
+      REDIS_URL: redis://redis:6379
+      LOG_LEVEL: info
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    command: pnpm --filter @insightview/api run start
+
+  scheduler:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.node-service
+      args:
+        SERVICE: scheduler
+    environment:
+      PORT: "4100"
+      DATABASE_URL: postgres://insightview:insightview@postgres:5432/insightview
+      REDIS_URL: redis://redis:6379
+      LOG_LEVEL: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4100/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    command: pnpm --filter @insightview/scheduler run start
+
+  runner:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.runner
+    environment:
+      PORT: "4200"
+      RUNNER_ID: runner-1
+      DATABASE_URL: postgres://insightview:insightview@postgres:5432/insightview
+      REDIS_URL: redis://redis:6379
+      PROMETHEUS_PUSHGATEWAY: http://pushgateway:9091
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: insightview-artifacts
+      S3_FORCE_PATH_STYLE: "true"
+      AWS_REGION: us-east-1
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      LOG_LEVEL: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4200/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  alerting:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.node-service
+      args:
+        SERVICE: alerting
+    environment:
+      PORT: "4300"
+      DATABASE_URL: postgres://insightview:insightview@postgres:5432/insightview
+      REDIS_URL: redis://redis:6379
+      LOG_LEVEL: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4300/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    command: pnpm --filter @insightview/alerting run start
+
+  rum-collector:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.node-service
+      args:
+        SERVICE: rum-collector
+    environment:
+      PORT: "4400"
+      DATABASE_URL: postgres://insightview:insightview@postgres:5432/insightview
+      LOG_LEVEL: info
+    ports:
+      - "4400:4400"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4400/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    command: pnpm --filter @insightview/rum-collector run start
+
+  dashboard:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.dashboard
+      args:
+        # Vite inlines this at build time; runtime env vars on the
+        # nginx container have no effect on the bundled SPA.
+        VITE_API_URL: http://localhost:4000
+    ports:
+      - "5173:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  test-site:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.test-site
+    ports:
+      - "8080:80"
+    depends_on:
+      rum-collector:
+        condition: service_healthy
+    healthcheck:
+      # Use 127.0.0.1 explicitly: nginx in this image binds IPv4
+      # only and Alpine's wget resolves "localhost" to ::1 first.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pg_data:
+  redis_data:
+  minio_data:
+  kafka_data:

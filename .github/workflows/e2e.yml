@@ -1,0 +1,83 @@
+name: End-to-End
+
+# Brings up the full docker-compose stack and runs the synthetic + RUM
+# end-to-end assertions against it. This is the authoritative proof
+# that the platform works top to bottom.
+#
+# This workflow is INTENTIONALLY not auto-triggered on every PR: the
+# compose stack builds ~10 Docker images and runs for several minutes,
+# which is wasteful unless you actually need the platform gate.
+#
+# To run it on a PR, add the `e2e` label to the PR, or use the manual
+# workflow_dispatch button from the Actions tab.
+
+on:
+  pull_request:
+    types: [labeled, synchronize, opened, reopened]
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "infra/**"
+      - "action.yml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+        contains(github.event.pull_request.labels.*.name, 'e2e'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.0.0 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @insightview/db run generate
+
+      - name: Build RUM SDK
+        run: pnpm --filter @insightview/rum-sdk run build
+
+      - name: Bring up the platform stack
+        run: pnpm compose:up
+
+      - name: Run end-to-end test
+        env:
+          API_URL: http://localhost:4000
+          PUSHGATEWAY_URL: http://localhost:9091
+          TEST_SITE_URL: http://localhost:8080
+          MINIO_ENDPOINT: http://localhost:9000
+        run: pnpm e2e:test
+
+      - name: Capture compose logs
+        if: always()
+        run: |
+          mkdir -p compose-logs
+          docker compose -f infra/docker-compose.yml logs \
+            --no-color > compose-logs/all.txt 2>&1 || true
+
+      - name: Upload compose logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compose-logs
+          path: compose-logs
+          retention-days: 7
+
+      - name: Tear down stack
+        if: always()
+        run: pnpm compose:down

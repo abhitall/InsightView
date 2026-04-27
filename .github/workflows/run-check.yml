@@ -1,0 +1,33 @@
+name: Run Check
+
+# Triggers a single synthetic run via the InsightView platform API and
+# waits for the terminal status. Useful for ad-hoc validation, PR
+# deploy gates, and manual re-runs from the UI.
+
+on:
+  workflow_dispatch:
+    inputs:
+      check_name:
+        description: "Check name to run"
+        required: true
+        type: string
+      wait:
+        description: "Wait for the run to finish"
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  run-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trigger run via InsightView
+        uses: ./
+        with:
+          command: run
+          api_url: ${{ secrets.INSIGHTVIEW_API_URL }}
+          api_token: ${{ secrets.INSIGHTVIEW_API_TOKEN }}
+          check_name: ${{ inputs.check_name }}
+          wait: ${{ inputs.wait }}

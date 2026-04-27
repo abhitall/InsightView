@@ -1,0 +1,29 @@
+{{- range $svc := list "api" "runner" "rumCollector" }}
+{{- $cfg := index $.Values $svc }}
+{{- if and $cfg $cfg.hpa $cfg.hpa.enabled }}
+{{- $name := $svc }}
+{{- if eq $svc "rumCollector" }}{{- $name = "rum-collector" }}{{- end }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "insightview.fullname" $ }}-{{ $name }}
+  labels:
+    {{- include "insightview.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "insightview.fullname" $ }}-{{ $name }}
+  minReplicas: {{ $cfg.hpa.minReplicas }}
+  maxReplicas: {{ $cfg.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $cfg.hpa.targetCPUUtilizationPercentage }}
+{{- end }}
+{{- end }}

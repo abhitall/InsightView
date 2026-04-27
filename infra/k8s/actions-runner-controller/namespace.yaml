@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: insightview-arc
+  labels:
+    app.kubernetes.io/name: insightview-arc
+    app.kubernetes.io/component: github-actions-runners

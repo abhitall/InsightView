@@ -1,0 +1,58 @@
+name: CI
+
+# Fast CI gate — runs on every push and PR. Installs workspace
+# dependencies, runs the typechecker across every package, and
+# builds the RUM SDK IIFE bundle. Does NOT spin up Docker or
+# Playwright browsers; those are gated behind the e2e workflow.
+
+on:
+  push:
+    branches:
+      - main
+      - "claude/**"
+      - "feat/**"
+      - "fix/**"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.0.0 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @insightview/db run generate
+
+      - name: Typecheck all workspaces
+        run: pnpm -r run typecheck
+
+      - name: Unit tests (vitest)
+        run: pnpm test:unit
+
+      - name: Build RUM SDK IIFE bundle
+        run: pnpm --filter @insightview/rum-sdk run build
+
+      - name: Upload RUM SDK bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: rum-sdk-dist
+          path: packages/rum-sdk/dist
+          retention-days: 7

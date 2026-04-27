@@ -1,0 +1,26 @@
+groups:
+  - name: synthetic-monitoring
+    rules:
+      - record: synthetic_monitoring:web_vitals:avg
+        expr: avg(synthetic_monitoring_web_vitals) by (metric, url)
+
+      - record: synthetic_monitoring:test_metrics:success_rate
+        expr: sum(synthetic_monitoring_test_metrics{status="passed"}) / sum(synthetic_monitoring_test_metrics) * 100
+
+      - alert: HighWebVitalLCP
+        expr: synthetic_monitoring_web_vitals{metric="LCP"} > 2500
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High LCP detected
+          description: "LCP is above 2500ms for {{ $labels.url }} (current value {{ $value }}ms)"
+
+      - alert: HighWebVitalINP
+        expr: synthetic_monitoring_web_vitals{metric="INP"} > 200
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High INP detected
+          description: "INP is above 200ms for {{ $labels.url }} (current value {{ $value }}ms)"

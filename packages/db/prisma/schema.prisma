@@ -1,0 +1,346 @@
+// InsightView core data model. Postgres primary store for checks, runs,
+// results, alerts, and RUM events. See docs/adr/0003-storage-strategy.md
+// for the rationale and future migration path to ClickHouse + VictoriaMetrics.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---- Enums (mirrored in packages/core/src/enums.ts) ----
+
+enum CheckType {
+  BROWSER
+  API
+  TCP
+}
+
+enum CheckRunStatus {
+  QUEUED
+  RUNNING
+  PASSED
+  FAILED
+  TIMEOUT
+  ERROR
+}
+
+enum TriggerSource {
+  SCHEDULE
+  MANUAL
+  API
+  ACTION
+}
+
+enum AlertStrategy {
+  THRESHOLD
+  CONSECUTIVE_FAILURES
+  COMPOSITE
+  ANOMALY_DETECTION
+  RUM_METRIC
+}
+
+enum Severity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum IncidentStatus {
+  FIRING
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+enum NotificationChannelType {
+  SLACK_WEBHOOK
+  GENERIC_WEBHOOK
+  STDOUT
+}
+
+enum RumEventType {
+  WEB_VITAL
+  ERROR
+  RESOURCE
+  NAVIGATION
+  CUSTOM
+}
+
+// ---- Core entities ----
+
+model Check {
+  id             String      @id @default(cuid())
+  tenantId       String      @default("default")
+  name           String
+  description    String?
+  type           CheckType   @default(BROWSER)
+  enabled        Boolean     @default(true)
+  schedule       String
+  targetUrl      String
+  timeoutMs      Int         @default(30000)
+  retries        Int         @default(0)
+  locations      String[]    @default(["local"])
+  scriptRef      String?
+  assertions     Json        @default("[]")
+  tags           String[]    @default([])
+  sourceYaml     String?
+  sourceYamlHash String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  runs       CheckRun[]
+  alertRules AlertRule[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, enabled])
+}
+
+model CheckRun {
+  id           String         @id
+  tenantId     String         @default("default")
+  checkId      String
+  scheduledAt  DateTime
+  startedAt    DateTime?
+  completedAt  DateTime?
+  status       CheckRunStatus @default(QUEUED)
+  triggeredBy  TriggerSource  @default(SCHEDULE)
+  runnerId     String?
+  attempt      Int            @default(1)
+  errorMessage String?
+  createdAt    DateTime       @default(now())
+
+  check     Check            @relation(fields: [checkId], references: [id], onDelete: Cascade)
+  results   CheckResult[]
+  incidents AlertIncident[]
+
+  @@index([tenantId, checkId, scheduledAt])
+  @@index([status, scheduledAt])
+}
+
+model CheckResult {
+  id               String   @id @default(cuid())
+  tenantId         String   @default("default")
+  runId            String
+  stepName         String
+  url              String
+  durationMs       Int
+  status           String
+  webVitals        Json     @default("{}")
+  resourceStats    Json     @default("{}")
+  navigationStats  Json     @default("{}")
+  assertionsPassed Int      @default(0)
+  assertionsFailed Int      @default(0)
+  traceS3Key       String?
+  screenshotS3Key  String?
+  createdAt        DateTime @default(now())
+
+  run CheckRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, runId])
+  @@index([tenantId, createdAt])
+}
+
+model AlertRule {
+  id              String        @id @default(cuid())
+  tenantId        String        @default("default")
+  name            String
+  checkId         String?
+  enabled         Boolean       @default(true)
+  strategy        AlertStrategy
+  expression      Json          @default("{}")
+  severity        Severity      @default(WARNING)
+  cooldownSeconds Int           @default(300)
+  channelIds      String[]      @default([])
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  check     Check?          @relation(fields: [checkId], references: [id], onDelete: SetNull)
+  incidents AlertIncident[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, enabled])
+}
+
+model AlertIncident {
+  id             String         @id
+  tenantId       String         @default("default")
+  ruleId         String
+  checkId        String?
+  runId          String?
+  status         IncidentStatus @default(FIRING)
+  severity       Severity
+  openedAt       DateTime       @default(now())
+  resolvedAt     DateTime?
+  lastNotifiedAt DateTime?
+  payload        Json           @default("{}")
+  dedupeKey      String
+
+  rule AlertRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  run  CheckRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status])
+  @@index([tenantId, ruleId])
+  @@index([dedupeKey, status])
+}
+
+model NotificationChannel {
+  id        String                  @id @default(cuid())
+  tenantId  String                  @default("default")
+  name      String
+  type      NotificationChannelType
+  config    Json                    @default("{}")
+  enabled   Boolean                 @default(true)
+  createdAt DateTime                @default(now())
+
+  @@unique([tenantId, name])
+}
+
+model RumSession {
+  id             String   @id
+  tenantId       String   @default("default")
+  siteId         String
+  userAgent      String
+  country        String?
+  startedAt      DateTime @default(now())
+  lastSeenAt     DateTime @default(now())
+  pageCount      Int      @default(0)
+  deviceCategory String?
+
+  events RumEvent[]
+
+  @@index([tenantId, siteId, startedAt])
+}
+
+model RumEvent {
+  id         String       @id @default(cuid())
+  tenantId   String       @default("default")
+  sessionId  String
+  siteId     String
+  type       RumEventType
+  name       String
+  value      Float?
+  rating     String?
+  url        String
+  occurredAt DateTime
+  receivedAt DateTime     @default(now())
+  attributes Json         @default("{}")
+
+  session RumSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, siteId, type, receivedAt])
+  @@index([sessionId])
+}
+
+model WatchdogHeartbeat {
+  id                      String   @id @default(cuid())
+  scope                   String   @unique
+  leaderId                String
+  lastBeatAt              DateTime @updatedAt
+  expectedIntervalSeconds Int      @default(30)
+}
+
+model MonitorDeployment {
+  id        String   @id @default(cuid())
+  tenantId  String   @default("default")
+  actor     String
+  source    String
+  yamlHash  String
+  diff      Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+}
+
+// Uploaded source maps for RUM error deobfuscation. Clients POST
+// their source maps keyed by release + bundle URL; the error
+// enrichment pipeline looks them up by matching the frame's URL
+// against the stored key.
+model SourceMap {
+  id          String   @id @default(cuid())
+  tenantId    String   @default("default")
+  release     String
+  bundleUrl   String
+  content     String
+  contentHash String
+  createdAt   DateTime @default(now())
+
+  @@unique([tenantId, release, bundleUrl])
+  @@index([tenantId, release])
+}
+
+// Session replay chunks. Stored as serialized rrweb event
+// sequences so they can be replayed client-side. One row per
+// batch flushed by the SDK; the dashboard joins by sessionId +
+// sequence number to reconstruct the timeline.
+model RumReplayChunk {
+  id        String   @id @default(cuid())
+  tenantId  String   @default("default")
+  sessionId String
+  siteId    String
+  sequence  Int
+  payload   String
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, sessionId, sequence])
+  @@index([tenantId, siteId, createdAt])
+}
+
+// Transactional outbox (ADR 0010). Writers persist domain events
+// in the same tx as their primary row and an outbox publisher
+// reads unpublished rows and ships them to Kafka. Row is marked
+// published (rather than deleted) so Postgres MVCC doesn't bloat
+// under high throughput; a batch reaper deletes rows older than
+// the retention window.
+model DomainEvent {
+  id          String    @id
+  tenantId    String    @default("default")
+  topic       String
+  type        String
+  payload     Json
+  traceId     String?
+  createdAt   DateTime  @default(now())
+  publishedAt DateTime?
+
+  @@index([publishedAt, createdAt])
+  @@index([topic, createdAt])
+}
+
+// API tokens for the platform API (ADR 0012). Hashed at rest so
+// a DB leak doesn't expose raw tokens; scope is a free-form
+// string the tenant plugin parses. Roles: admin | write | read.
+model ApiToken {
+  id          String    @id @default(cuid())
+  tenantId    String    @default("default")
+  name        String
+  tokenHash   String    @unique
+  role        String    @default("read")
+  scopes      String[]  @default([])
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([tenantId, revokedAt])
+}
+
+// Generic audit log. Every mutating API request emits one row.
+// Separate from MonitorDeployment (that's monitors-as-code
+// specific) because audit covers everything: rule edits,
+// incident acknowledgements, channel changes, token mints.
+model AuditLog {
+  id         String   @id @default(cuid())
+  tenantId   String   @default("default")
+  actor      String
+  action     String
+  resource   String
+  resourceId String?
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([resource, resourceId])
+}

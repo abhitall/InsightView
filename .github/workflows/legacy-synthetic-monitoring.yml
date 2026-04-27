@@ -1,0 +1,63 @@
+name: Legacy Synthetic Monitoring
+
+# DEPRECATED. Kept for backwards compatibility with v1.x users of the
+# action. New deployments should prefer the platform-aware workflows:
+#  - native-synthetic.yml  (command: native-run — recommended)
+#  - run-check.yml         (command: run — requires the platform API)
+#  - deploy-monitors.yml   (command: deploy)
+#  - validate-monitors.yml (command: validate)
+# See docs/ROADMAP.md for the migration path.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      test_url:
+        description: "Target URL to test"
+        required: false
+        type: string
+      browser:
+        description: "Browser to test with"
+        required: false
+        type: choice
+        options:
+          - chromium
+          - mobile-chrome
+        default: "chromium"
+      env_vars:
+        description: "Additional environment variables (JSON)"
+        required: false
+        type: string
+        default: "{}"
+
+jobs:
+  synthetic-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: mcr.microsoft.com/playwright:v1.59.1-noble
+      options: --user 1001 --ipc=host
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Synthetic Monitoring (legacy path)
+        uses: ./
+        with:
+          command: legacy-run
+          test_url: ${{ inputs.test_url || vars.TEST_URL || 'https://example.com' }}
+          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws_region: ${{ secrets.AWS_REGION }}
+          s3_bucket: ${{ secrets.S3_BUCKET }}
+          s3_endpoint: ${{ secrets.S3_ENDPOINT || secrets.MINIO_ENDPOINT }}
+          s3_force_path_style: ${{ secrets.S3_FORCE_PATH_STYLE || 'true' }}
+          s3_tls_verify: ${{ secrets.S3_TLS_VERIFY || 'false' }}
+          minio_access_key: ${{ secrets.MINIO_ACCESS_KEY }}
+          minio_secret_key: ${{ secrets.MINIO_SECRET_KEY }}
+          minio_root_user: ${{ secrets.MINIO_ROOT_USER }}
+          minio_root_password: ${{ secrets.MINIO_ROOT_PASSWORD }}
+          minio_endpoint: ${{ secrets.MINIO_ENDPOINT }}
+          prometheus_pushgateway: ${{ secrets.PROMETHEUS_PUSHGATEWAY || 'http://localhost:9091' }}
+          browser: ${{ inputs.browser || 'chromium' }}
+          env_vars: ${{ inputs.env_vars || '{}' }}
